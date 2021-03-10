@@ -1,18 +1,24 @@
 mod value;
 
 use std::{collections::HashMap, env, fmt::Debug, iter::Peekable, usize};
-use crate::value::Value;
+use value::Type;
+
+use crate::value::{Value, cast_type};
 
 #[derive(Debug, PartialEq)]
-enum Error {
+pub enum Error {
     UnknownArg(String),
     InvalidArg,
-    WrongNumValues(String, NumValues, Vec<String>)
+    MissingRequiredArgs(Vec<String>),
+    // @todo: lets avoid exposing Value here
+    WrongNumValues(String, NumValues, Value),
+    WrongValueType(Value),
+    WrongCastType(String)
 }
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone, Copy)]
-enum NumValues {
+pub enum NumValues {
     None,
     Fixed(usize),
     Any
@@ -31,9 +37,11 @@ struct Arg<'a> {
     // name for the value of this arg in --help
     value_name: Option<&'a str>,
     // default value for this arg
-    default: fn() -> Option<Value>,
+    default: Option<fn() -> Value>,
     // whether this arg is required
-    required: bool
+    required: bool,
+    // type for values
+    value_type: Type
 }
 
 impl <'a> std::default::Default for Arg<'a> {
@@ -44,8 +52,9 @@ impl <'a> std::default::Default for Arg<'a> {
             about: "",
             num_values: NumValues::None,
             value_name: None,
-            default: || { None },
-            required: false
+            default: None,
+            required: false,
+            value_type: Type::Any
         }
     }
 }
@@ -79,13 +88,8 @@ impl<'a, T: Default> std::default::Default for Args<'a, T> {
 }
 
 #[derive(Debug)]
-struct ArgResult {
-    values: Vec<String>
-}
-
-#[derive(Debug)]
 struct Results {
-    params: HashMap<String, ArgResult>,
+    params: HashMap<String, Value>,
     extra: Vec<String>
 }
 
@@ -93,7 +97,7 @@ impl std::default::Default for Results {
     fn default() -> Self {
         Results { 
             params: Default::default(), 
-            extra: Default::default() 
+            extra: Default::default()
         }
     }
 }
@@ -129,11 +133,11 @@ impl<'a, R> Args<'a, R> {
         self.parse(env::args())
     }
 
-    fn generate_help(&self) -> ArgResult {
-        ArgResult { values: Default::default() }
+    fn generate_help(&self) -> Value {
+        Value::None
     }
 
-    fn handle_arg<T>(&self, arg: &str, args: &mut Peekable<T>) -> Result<(&str, ArgResult), Error>
+    fn handle_arg<T>(&self, arg: &str, args: &mut Peekable<T>) -> Result<(&str, Value), Error>
     where T: Iterator<Item=String> {
         let res = self.args.iter().find(|&a| {
             a.aliases.iter().any(|&i| i == arg)
@@ -141,12 +145,13 @@ impl<'a, R> Args<'a, R> {
         match res {
             Some(arg) => {
                 let mut params = vec![];
+                let target = &arg.value_type;
                 while let Some(arg) = args.peek() {
                     // @todo: test how this handles quotes
                     if arg.starts_with("-") {
                         break;
                     }
-                    params.push(arg.to_string());
+                    params.push(cast_type(target, arg.to_string())?);
                     args.next();
                 }
                 let expected = match arg.num_values {
@@ -154,11 +159,17 @@ impl<'a, R> Args<'a, R> {
                     NumValues::Fixed(i) => i,
                     NumValues::None => 0
                 };
-                // @todo: handle defaults
+                // @todo: this logic really needs cleaned up
                 if params.len() == expected {
-                    Ok((arg.name, ArgResult { values: params }))
+                    if expected == 0 {
+                        return Ok((arg.name, Value::None))
+                    }
+                    match &target {
+                        Type::Array(_) => Ok((arg.name, Value::from(params))),
+                        _ => Ok((arg.name, if expected == 1 { params.pop().unwrap() } else {Value::from(params) }))
+                    }
                 } else {
-                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, params))
+                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
                 }
             },
             None => match arg {
@@ -170,7 +181,7 @@ impl<'a, R> Args<'a, R> {
 
     fn apply<T: Iterator<Item=String>>(&self, args: T) -> Result<R, Error> {
         // @todo: top level args
-        let mut params: HashMap<String, ArgResult> = HashMap::with_capacity(self.args.len());
+        let mut params: HashMap<String, Value> = HashMap::with_capacity(self.args.len());
         let mut extra = Vec::with_capacity(0);
         let mut args = args.peekable();
         while let Some(arg) = args.next() {
@@ -186,6 +197,20 @@ impl<'a, R> Args<'a, R> {
             }
             // @todo
         }
+
+        let mut missing = Vec::with_capacity(0);
+        for param in &self.args {
+            if !params.contains_key(param.name) {
+                if let Some(default) = param.default {
+                    params.insert(param.name.to_owned(), default());
+                } else if param.required {
+                    missing.push(param.name.to_string());
+                }
+            }
+        }
+        if !missing.is_empty() {
+            return Err(Error::MissingRequiredArgs(missing))
+        }
         Ok((self.handler)(Results { params, extra }))
     }
 }
@@ -193,7 +218,9 @@ impl<'a, R> Args<'a, R> {
 
 #[cfg(test)]
 mod test {
-    use crate::{Args, Arg, Error, NumValues};
+    use std::convert::TryInto;
+
+    use crate::{Args, Arg, Error, NumValues, Value};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -227,7 +254,7 @@ mod test {
         };
         let input = vec!["prog", "-arg"];
         let res = args.parse(input.into_iter().map(|i| i.to_owned()));
-        assert_eq!(Err(Error::WrongNumValues("arg".to_owned(), NumValues::Fixed(1), vec![])), res); 
+        assert_eq!(Err(Error::WrongNumValues("arg".to_owned(), NumValues::Fixed(1), Value::from(vec![]))), res); 
     }
 
     #[test]
@@ -240,7 +267,8 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["lol"]);
+                let vec: &String = arg.try_into().unwrap();
+                assert_eq!(vec, &"lol");
                 1
             } else {0},
             ..Default::default()
@@ -260,7 +288,7 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, Vec::<String>::with_capacity(0));
+                assert_eq!(arg, &Value::None);
                 1
             } else {0},
             ..Default::default()
@@ -280,7 +308,8 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["lol"]);
+                let vec: &String = arg.try_into().unwrap();
+                assert_eq!(vec, &"lol");
                 1
             } else {0},
             ..Default::default()
@@ -300,7 +329,8 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["lol", "lol2"]);
+                let vec: Vec<&String> = arg.try_into().unwrap();
+                assert_eq!(vec, vec![&"lol", &"lol2"]);
                 1
             } else {0},
             ..Default::default()
@@ -320,7 +350,8 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["lol"]);
+                let vec: &String = arg.try_into().unwrap();
+                assert_eq!(vec, &"lol");
                 1
             } else {0},
             ..Default::default()
@@ -329,7 +360,7 @@ mod test {
         let res = args.parse(input.into_iter().map(|i| i.to_owned()));
         assert_eq!(Err(Error::WrongNumValues("arg".to_owned(), 
             NumValues::Fixed(1), 
-            vec!["lol".to_string(), "no".to_string()])), res); 
+            Value::from(vec![Value::from("lol"), Value::from("no")]))), res); 
     }
 
     #[test]
@@ -342,7 +373,8 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["lol"]);
+                let vec: &String = arg.try_into().unwrap();
+                assert_eq!(vec, &"lol");
                 1
             } else {0},
             ..Default::default()
@@ -361,8 +393,9 @@ mod test {
                 num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
-            handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["lol"]);
+            handler: |r| if let Some(arg) = r.params.get("arg") {
+                let vec: &String = arg.try_into().unwrap();
+                assert_eq!(vec, &"lol");
                 1
             } else {0},
             ..Default::default()
@@ -387,9 +420,10 @@ mod test {
                 ..Default::default()
             }],
             handler: |r| if let Some(arg) = r.params.get("arg") { 
-                assert_eq!(arg.values, vec!["1", "2"]);
+                let vec: Vec<&String> = arg.try_into().unwrap();
+                assert_eq!(vec, vec![&"1", &"2"]);
                 if let Some(arg) = r.params.get("arg2") {
-                    assert_eq!(arg.values, Vec::<String>::with_capacity(0));
+                    assert_eq!(arg, &Value::None);
                     1
                 } else {
                     0
