@@ -21,6 +21,8 @@ pub enum Error {
 pub enum NumValues {
     None,
     Fixed(usize),
+    AtLeast(usize),
+    Between(usize, usize),
     Any,
 }
 
@@ -134,34 +136,64 @@ impl<'a, R> Args<'a, R> {
         Value::None
     }
 
-    fn get_values<T>(&self, arg: &Arg, args: &mut Peekable<T>) -> Result<Value, Error>
+    fn get_values_unbounded<T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
     where
         T: Iterator<Item = String>,
     {
         let target = &arg.value_type;
+        let mut params = Vec::with_capacity(est);
+        while let Some(arg) = args.peek() {
+            if arg.starts_with("-") {
+                break;
+            }
+            params.push(cast_type(target, arg.to_string())?);
+            args.next();
+        }
+        Ok(params)
+    }
+
+    fn get_values_bounded<T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
+    where
+        T: Iterator<Item = String>,
+    {
+        let target = &arg.value_type;
+        let mut params = Vec::with_capacity(est);
+        let mut j = 0;
+        while let Some(arg) = args.peek() {
+            if arg.starts_with("-") || j == est {
+                break;
+            }
+            j += 1;
+            params.push(cast_type(target, arg.to_string())?);
+            args.next();
+        }
+        Ok(params)
+    }
+
+    fn get_values<T>(&self, arg: &Arg, args: &mut Peekable<T>) -> Result<Value, Error>
+    where
+        T: Iterator<Item = String>,
+    {
         return match arg.num_values {
-            NumValues::Any => {
-                let mut params = vec![];
-                while let Some(arg) = args.peek() {
-                    if arg.starts_with("-") {
-                        break;
-                    }
-                    params.push(cast_type(target, arg.to_string())?);
-                    args.next();
+            NumValues::Any => Ok(self.get_values_unbounded(arg, args, 0)?.into()),
+            NumValues::AtLeast(i) => {
+                let params = self.get_values_unbounded(arg, args, 0)?;
+                if params.len() >= i {
+                    Ok(params.into())
+                } else {
+                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
                 }
-                Ok(params.into())
+            }
+            NumValues::Between(low, high) => {
+                let params = self.get_values_bounded(arg, args, high)?;
+                if params.len() >= low && params.len() <= high {
+                    Ok(params.into())
+                } else {
+                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
+                }
             }
             NumValues::Fixed(i) => {
-                let mut params = Vec::with_capacity(i);
-                let mut j = 0;
-                while let Some(arg) = args.peek() {
-                    if arg.starts_with("-") || j == i {
-                        break;
-                    }
-                    j += 1;
-                    params.push(cast_type(target, arg.to_string())?);
-                    args.next();
-                }
+                let mut params = self.get_values_bounded(arg, args, i)?;
                 if params.len() != i {
                     Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
                 } else if params.len() == 1 {
