@@ -80,14 +80,16 @@ impl<'a, T: Default> std::default::Default for Args<'a, T> {
 #[derive(Debug)]
 struct Results {
     params: HashMap<String, Value>,
-    extra: Vec<String>,
+    unknown_params: Vec<String>,
+    properties: Vec<String>,
 }
 
 impl std::default::Default for Results {
     fn default() -> Self {
         Results {
             params: Default::default(),
-            extra: Default::default(),
+            unknown_params: Default::default(),
+            properties: Default::default(),
         }
     }
 }
@@ -132,41 +134,53 @@ impl<'a, R> Args<'a, R> {
         Value::None
     }
 
-    fn handle_arg<T>(&self, arg: &str, args: &mut Peekable<T>) -> Result<(&str, Value), Error>
+    fn get_values<T>(&self, arg: &Arg, args: &mut Peekable<T>) -> Result<Value, Error>
     where
         T: Iterator<Item = String>,
     {
-        let res = self.args.iter().find(|&a| a.aliases.iter().any(|&i| i == arg));
-        match res {
-            Some(arg) => {
+        let target = &arg.value_type;
+        return match arg.num_values {
+            NumValues::Any => {
                 let mut params = vec![];
-                let target = &arg.value_type;
                 while let Some(arg) = args.peek() {
-                    // @todo: test how this handles quotes
                     if arg.starts_with("-") {
                         break;
                     }
                     params.push(cast_type(target, arg.to_string())?);
                     args.next();
                 }
-                let expected = match arg.num_values {
-                    NumValues::Any => params.len(),
-                    NumValues::Fixed(i) => i,
-                    NumValues::None => 0,
-                };
-                // @todo: this logic really needs cleaned up
-                if params.len() == expected {
-                    if expected == 0 {
-                        return Ok((arg.name, Value::None));
+                Ok(params.into())
+            }
+            NumValues::Fixed(i) => {
+                let mut params = Vec::with_capacity(i);
+                let mut j = 0;
+                while let Some(arg) = args.peek() {
+                    if arg.starts_with("-") || j == i {
+                        break;
                     }
-                    match &target {
-                        Type::Array(_) => Ok((arg.name, Value::from(params))),
-                        _ => Ok((arg.name, if expected == 1 { params.pop().unwrap() } else { Value::from(params) })),
-                    }
-                } else {
+                    j += 1;
+                    params.push(cast_type(target, arg.to_string())?);
+                    args.next();
+                }
+                if params.len() != i {
                     Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
+                } else if params.len() == 1 {
+                    Ok(params.pop().unwrap())
+                } else {
+                    Ok(params.into())
                 }
             }
+            NumValues::None => Ok(Value::None),
+        };
+    }
+
+    fn handle_arg<T>(&self, arg: &str, args: &mut Peekable<T>) -> Result<(&str, Value), Error>
+    where
+        T: Iterator<Item = String>,
+    {
+        let res = self.args.iter().find(|&a| a.aliases.iter().any(|&i| i == arg));
+        match res {
+            Some(arg) => Ok((arg.name, self.get_values(arg, args)?)),
             None => match arg {
                 "--help" | "-h" => Ok(("help", self.generate_help())),
                 _ => Err(Error::UnknownArg(arg.to_owned())),
@@ -175,9 +189,10 @@ impl<'a, R> Args<'a, R> {
     }
 
     fn apply<T: Iterator<Item = String>>(&self, args: T) -> Result<R, Error> {
-        // @todo: top level args
+        // @todo: I wonder if we can avoid hashing with compile time magic?
         let mut params: HashMap<String, Value> = HashMap::with_capacity(self.args.len());
         let mut extra = Vec::with_capacity(0);
+        let mut properties = Vec::with_capacity(0);
         let mut args = args.peekable();
         while let Some(arg) = args.next() {
             // an argument :O time to start searching!
@@ -189,8 +204,9 @@ impl<'a, R> Args<'a, R> {
                     Err(Error::UnknownArg(arg)) => extra.push(arg),
                     Err(e) => return Err(e),
                 }
+            } else {
+                properties.push(arg);
             }
-            // @todo
         }
 
         let mut missing = Vec::with_capacity(0);
@@ -207,7 +223,11 @@ impl<'a, R> Args<'a, R> {
         if !missing.is_empty() {
             return Err(Error::MissingRequiredArgs(missing));
         }
-        Ok((self.handler)(Results { params, extra }))
+        Ok((self.handler)(Results {
+            params,
+            unknown_params: extra,
+            properties,
+        }))
     }
 }
 
@@ -286,7 +306,7 @@ mod test {
                 num_values: NumValues::Any,
                 ..Default::default()
             }],
-            handler: |r| assert_has!(&Value::None, r, "arg"),
+            handler: |r| assert_has!(&vec![], r, "arg"),
             ..Default::default()
         };
         assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg"]));
@@ -301,7 +321,7 @@ mod test {
                 num_values: NumValues::Any,
                 ..Default::default()
             }],
-            handler: |r| assert_has!("lol", r, "arg"),
+            handler: |r| assert_has!(vec!["lol"], r, "arg"),
             ..Default::default()
         };
         assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "lol"]));
@@ -331,17 +351,10 @@ mod test {
                 num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
-            handler: |r| assert_has!("lol", r, "arg"),
+            handler: |r| assert_has!("lol", r, "arg") == 1 && r.properties.first().filter(|i| i.as_str() == "no").is_some(),
             ..Default::default()
         };
-        assert_eq!(
-            Err(Error::WrongNumValues(
-                "arg".to_owned(),
-                NumValues::Fixed(1),
-                Value::from(vec![Value::from("lol"), Value::from("no")])
-            )),
-            args.parse_str(vec!["prog", "-arg", "lol", "no"])
-        );
+        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-arg", "lol", "no"]));
     }
 
     #[test]
@@ -467,6 +480,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 required: true,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             ..Default::default()
@@ -481,6 +495,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 required: true,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
@@ -496,6 +511,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::Bool,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
@@ -511,6 +527,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::Bool,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!(&true, r, "arg"),
@@ -526,6 +543,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::Int,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!(&3, r, "arg"),
@@ -541,6 +559,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::Long,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!(&i64::max_value(), r, "arg"),
@@ -556,6 +575,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::Float,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!(&f32::MAX, r, "arg"),
@@ -571,6 +591,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::Double,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!(&f64::MAX, r, "arg"),
@@ -586,6 +607,7 @@ mod test {
                 name: "arg",
                 aliases: vec!["-arg"],
                 value_type: Type::String,
+                num_values: NumValues::Fixed(1),
                 ..Default::default()
             }],
             handler: |r| assert_has!("woop", r, "arg"),
@@ -652,5 +674,29 @@ mod test {
             ..Default::default()
         };
         assert_eq!(Err(Error::WrongValueType("lol".into())), args.parse_str(vec!["prog"]));
+    }
+
+    #[test]
+    fn test_property() {
+        let args = Args {
+            handler: |r| r.properties.first().filter(|i| i.as_str() == "prop").is_some(),
+            ..Default::default()
+        };
+        assert_eq!(Ok(true), args.parse_str(vec!["prog", "prop"]));
+    }
+
+    #[test]
+    fn test_property_after_arg() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            handler: |r| r.properties.first().filter(|i| i.as_str() == "prop").is_some(),
+            ..Default::default()
+        };
+        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-arg", "prop"]));
     }
 }
