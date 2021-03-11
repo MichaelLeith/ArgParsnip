@@ -1,7 +1,7 @@
 mod value;
 
 use std::{collections::HashMap, env, fmt::Debug, iter::Peekable, usize};
-use value::Type;
+use value::{check_type, Type};
 
 use crate::value::{cast_type, Value};
 
@@ -197,7 +197,8 @@ impl<'a, R> Args<'a, R> {
         for param in &self.args {
             if !params.contains_key(param.name) {
                 if let Some(default) = param.default {
-                    params.insert(param.name.to_owned(), default());
+                    let val = default();
+                    params.insert(param.name.to_owned(), check_type(&param.value_type, &val).map(|_| val)?);
                 } else if param.required {
                     missing.push(param.name.to_string());
                 }
@@ -212,7 +213,7 @@ impl<'a, R> Args<'a, R> {
 
 #[cfg(test)]
 mod test {
-    use std::{convert::TryInto, f32::MAX};
+    use std::convert::TryInto;
 
     use crate::{value::Type, Arg, Args, Error, NumValues, Value};
     use pretty_assertions::assert_eq;
@@ -636,5 +637,20 @@ mod test {
             ..Default::default()
         };
         assert_eq!(Err(Error::WrongCastType("true".to_string())), args.parse_str(vec!["prog", "-arg", "true"]));
+    }
+
+    #[test]
+    fn test_default_returns_wrong_type() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Int,
+                default: Some(|| "lol".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::WrongValueType("lol".into())), args.parse_str(vec!["prog"]));
     }
 }

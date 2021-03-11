@@ -144,6 +144,26 @@ macro_rules! cast {
     };
 }
 
+pub(crate) fn check_type(t: &Type, val: &Value) -> Result<(), Error> {
+    match (t, val) {
+        (Type::Any, _)
+        | (Type::Bool, Value::Bool(_))
+        | (Type::Int, Value::Int(_))
+        | (Type::Long, Value::Long(_))
+        | (Type::Float, Value::Float(_))
+        | (Type::Double, Value::Double(_))
+        | (Type::String, Value::String(_)) => Ok(()),
+        (Type::Array(a), Value::Array(v)) => {
+            if v.iter().all(|s| check_type(a, s).is_ok()) {
+                Ok(())
+            } else {
+                Err(Error::WrongValueType(val.clone()))
+            }
+        }
+        _ => Err(Error::WrongValueType(val.clone())),
+    }
+}
+
 pub(crate) fn cast_type(t: &Type, val: String) -> Result<Value, Error> {
     Ok(match t {
         Type::Any => Value::from(val),
