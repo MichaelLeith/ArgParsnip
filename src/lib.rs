@@ -212,9 +212,9 @@ impl<'a, R> Args<'a, R> {
 
 #[cfg(test)]
 mod test {
-    use std::convert::TryInto;
+    use std::{convert::TryInto, f32::MAX};
 
-    use crate::{Arg, Args, Error, NumValues, Value};
+    use crate::{value::Type, Arg, Args, Error, NumValues, Value};
     use pretty_assertions::assert_eq;
 
     macro_rules! assert_has {
@@ -442,5 +442,199 @@ mod test {
             ..Default::default()
         };
         assert_eq!(Ok(1), args.parse_str(vec!["prog", "sub", "sub"]));
+    }
+
+    #[test]
+    fn test_default_arg() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                default: Some(|| "lol".into()),
+                ..Default::default()
+            }],
+            handler: |r| assert_has!("lol", r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog"]));
+    }
+
+    #[test]
+    fn test_required_arg_missing() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                required: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::MissingRequiredArgs(vec!["arg".to_string()])), args.parse_str(vec!["prog"]));
+    }
+
+    #[test]
+    fn test_required_arg() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                required: true,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!("lol", r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "lol"]));
+    }
+
+    #[test]
+    fn test_wrong_type() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Bool,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!("lol", r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::WrongCastType("lol".to_string())), args.parse_str(vec!["prog", "-arg", "lol"]));
+    }
+
+    #[test]
+    fn test_right_type_bool() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Bool,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(&true, r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "true"]));
+    }
+
+    #[test]
+    fn test_right_type_int() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Int,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(&3, r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "3"]));
+    }
+
+    #[test]
+    fn test_right_type_long() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Long,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(&i64::max_value(), r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", i64::max_value().to_string().as_str()]));
+    }
+
+    #[test]
+    fn test_right_type_float() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Float,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(&f32::MAX, r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", f32::MAX.to_string().as_str()]));
+    }
+
+    #[test]
+    fn test_right_type_double() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Double,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(&f64::MAX, r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", f64::MAX.to_string().as_str()]));
+    }
+
+    #[test]
+    fn test_right_type_string() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::String,
+                ..Default::default()
+            }],
+            handler: |r| assert_has!("woop", r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "woop"]));
+    }
+
+    #[test]
+    fn test_right_type_array() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Array(Box::from(Type::Int)),
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(vec![&23, &32], r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "23", "32"]));
+    }
+
+    #[test]
+    fn test_right_type_array_single() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Array(Box::from(Type::Int)),
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(vec![&23], r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse_str(vec!["prog", "-arg", "23"]));
+    }
+
+    #[test]
+    fn test_wrong_type_array() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                aliases: vec!["-arg"],
+                value_type: Type::Array(Box::from(Type::Int)),
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(vec![&23], r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::WrongCastType("true".to_string())), args.parse_str(vec!["prog", "-arg", "true"]));
     }
 }
