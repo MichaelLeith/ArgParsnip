@@ -101,8 +101,43 @@ converters!(i32, Int);
 converters!(i64, Long);
 converters!(f32, Float);
 converters!(f64, Double);
-converters!(String, String);
 converters!(Vec<Value>, Array);
+
+impl std::convert::From<String> for Value {
+    fn from(val: String) -> Self {
+        Value::String(val)
+    }
+}
+
+impl<'a> std::convert::Into<String> for &'a Value {
+    fn into(self) -> String {
+        match self {
+            Value::String(v) => v.clone(),
+            Value::None => "".to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Int(v) => v.to_string(),
+            Value::Long(v) => v.to_string(),
+            Value::Float(v) => v.to_string(),
+            Value::Double(v) => v.to_string(),
+            Value::Array(v) => v.iter().map(|v| -> String { v.into() }).collect::<String>(),
+        }
+    }
+}
+
+impl std::convert::Into<String> for Value {
+    fn into(self) -> String {
+        match self {
+            Value::String(v) => v,
+            Value::None => "".to_string(),
+            Value::Bool(v) => v.to_string(),
+            Value::Int(v) => v.to_string(),
+            Value::Long(v) => v.to_string(),
+            Value::Float(v) => v.to_string(),
+            Value::Double(v) => v.to_string(),
+            Value::Array(v) => v.iter().map(|v| -> String { v.into() }).collect::<String>(),
+        }
+    }
+}
 
 impl<'a> std::convert::TryInto<&'a str> for &'a Value {
     type Error = Error;

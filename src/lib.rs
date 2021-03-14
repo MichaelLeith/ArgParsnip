@@ -17,6 +17,7 @@ pub enum Error {
     WrongNumValues(String, NumValues, Value),
     WrongValueType(Value),
     WrongCastType(String),
+    InvalidValue(String, String),
 }
 
 #[allow(dead_code)]
@@ -54,6 +55,8 @@ struct Arg<'a> {
     required: bool,
     // type for values
     value_type: Type,
+    // @todo: can we provide a default and avoid the Option?
+    validation: Option<fn(Value) -> Result<Value, String>>,
 }
 
 #[derive(Debug)]
@@ -152,11 +155,22 @@ impl<'a, R> Args<'a, R> {
     {
         let target = &arg.value_type;
         let mut params = Vec::with_capacity(est);
-        while let Some(arg) = args.peek() {
-            if arg.starts_with("-") {
+        while let Some(param) = args.peek() {
+            if param.starts_with("-") {
                 break;
             }
-            params.push(cast_type(target, arg.to_string())?);
+            let mut val = cast_type(target, param.to_string())?;
+            if let Some(validation) = arg.validation {
+                debug!("running validation for {:?}", val);
+                val = match validation(val) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        debug!("validation failed, reason: {}", e);
+                        return Err(Error::InvalidValue(param.clone(), e));
+                    }
+                };
+            }
+            params.push(val);
             args.next();
         }
         debug!("found params {:?}", params);
@@ -170,12 +184,23 @@ impl<'a, R> Args<'a, R> {
         let target = &arg.value_type;
         let mut params = Vec::with_capacity(est);
         let mut j = 0;
-        while let Some(arg) = args.peek() {
-            if arg.starts_with("-") || j == est {
+        while let Some(param) = args.peek() {
+            if param.starts_with("-") || j == est {
                 break;
             }
             j += 1;
-            params.push(cast_type(target, arg.to_string())?);
+            let mut val = cast_type(target, param.to_string())?;
+            if let Some(validation) = arg.validation {
+                debug!("running validation for {:?}", val);
+                val = match validation(val) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        debug!("validation failed, reason: {}", e);
+                        return Err(Error::InvalidValue(param.clone(), e));
+                    }
+                };
+            }
+            params.push(val);
             args.next();
         }
         debug!("found params {:?}", params);
@@ -186,7 +211,7 @@ impl<'a, R> Args<'a, R> {
     where
         T: Iterator<Item = String>,
     {
-        debug!("getting values for {:?}", arg);
+        debug!("getting values for {}", arg.name);
         return match arg.num_values {
             NumValues::Any => Ok(self.get_values_unbounded(arg, args, 0)?.into()),
             NumValues::AtLeast(i) => {
@@ -238,7 +263,7 @@ impl<'a, R> Args<'a, R> {
     {
         match target {
             Some(res) => {
-                debug!("found arg {:?} matching {}", res, arg);
+                debug!("found arg {} matching {}", res.name, arg);
                 out.insert(res.name.to_string(), self.get_values(res, args)?);
                 Ok(())
             }
@@ -919,5 +944,95 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(Ok(0), args.parse_str(vec!["prog", "-arg", "sub"]));
+    });
+
+    test!(test_validation() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::Fixed(1),
+                validation: Some(|v| {
+                    let s: String = (&v).into();
+                    if "abc" == s.as_str() {
+                        Ok(v)
+                    } else {
+                        Err("oh noes".to_string())
+                    }
+                }),
+                ..Default::default()
+            }],
+            handler: |r| !r.params.contains_key("a"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-a", "abc"]));
+    });
+
+    test!(test_validation_unbounded() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::Any,
+                validation: Some(|v| {
+                    let s: String = (&v).into();
+                    if "abc" == s.as_str() {
+                        Ok(v)
+                    } else {
+                        Err("oh noes".to_string())
+                    }
+                }),
+                ..Default::default()
+            }],
+            handler: |r| !r.params.contains_key("a"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-a", "abc"]));
+    });
+
+    test!(test_validation_fails() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::Fixed(1),
+                validation: Some(|v| {
+                    let s: String = (&v).into();
+                    if "abc" == s.as_str() {
+                        Ok(v)
+                    } else {
+                        Err("oh noes".to_string())
+                    }
+                }),
+                ..Default::default()
+            }],
+            handler: |r| !r.params.contains_key("a"),
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
+            args.parse_str(vec!["prog", "-a", "abcdef"]));
+    });
+
+    test!(test_validation_fails_unbounded() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::Any,
+                validation: Some(|v| {
+                    let s: String = (&v).into();
+                    if "abc" == s.as_str() {
+                        Ok(v)
+                    } else {
+                        Err("oh noes".to_string())
+                    }
+                }),
+                ..Default::default()
+            }],
+            handler: |r| !r.params.contains_key("a"),
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
+            args.parse_str(vec!["prog", "-a", "abcdef"]));
     });
 }

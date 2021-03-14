@@ -21,7 +21,6 @@ A small Argparser
 ** Support repeat arguments
 ** Bash/Zsh completion
 ** Combinations (e.g only allow arg A if arg B)
-** Value Ranges
 ** Colours!
 ** Support disabling arg override
 
