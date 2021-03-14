@@ -307,6 +307,14 @@ impl<'a, R> Args<'a, R> {
         while let Some(arg) = args.next() {
             // an argument :O time to start searching!
             if arg.starts_with("-") {
+                if arg == "--" {
+                    debug!("found --, treating everything after as positional");
+                    // doing this inline instead of using a boolean because no point in doing all those "if"s
+                    for arg in &mut args {
+                        debug!("found positional arg {}", arg);
+                        positional.push(arg);
+                    }
+                }
                 debug!("found arg {}", arg);
                 match self.handle_arg(&arg, &mut args, &mut params) {
                     Err(Error::UnknownArg(arg)) => extra.push(arg),
@@ -884,5 +892,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(Ok(true), args.parse_str(vec!["prog", "-ẨA"]));
+    });
+
+    test!(test_positional_after_double_dash() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            handler: |r| !r.params.contains_key("arg") && r.positional.first().filter(|f| f.as_str() == "-a").is_some(),
+            ..Default::default()
+        };
+        assert_eq!(Ok(true), args.parse_str(vec!["prog", "--", "-a"]));
     });
 }

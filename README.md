@@ -28,5 +28,4 @@ A small Argparser
 ** Json args?
 ** Colours!
 ** Support disabling arg override
-** -- support (only positional args afterwards)
 
