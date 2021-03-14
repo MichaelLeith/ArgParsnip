@@ -301,7 +301,7 @@ impl<'a, R> Args<'a, R> {
         debug!("parsing args using command {}", self.name);
         // @todo: I wonder if we can avoid hashing with compile time magic?
         let mut params: HashMap<String, Value> = HashMap::with_capacity(self.args.len());
-        let mut extra = Vec::with_capacity(0);
+        let mut unknown_params = Vec::with_capacity(0);
         let mut positional = Vec::with_capacity(0);
         let mut args = args.peekable();
         while let Some(arg) = args.next() {
@@ -317,7 +317,7 @@ impl<'a, R> Args<'a, R> {
                 }
                 debug!("found arg {}", arg);
                 match self.handle_arg(&arg, &mut args, &mut params) {
-                    Err(Error::UnknownArg(arg)) => extra.push(arg),
+                    Err(Error::UnknownArg(arg)) => unknown_params.push(arg),
                     Err(e) => return Err(e),
                     _ => {}
                 }
@@ -345,7 +345,7 @@ impl<'a, R> Args<'a, R> {
         }
         Ok((self.handler)(Results {
             params,
-            unknown_params: extra,
+            unknown_params,
             positional,
         }))
     }
