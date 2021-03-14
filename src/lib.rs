@@ -1,6 +1,6 @@
 mod value;
 
-use std::{collections::HashMap, env, fmt::Debug, iter::Peekable, usize};
+use std::{collections::HashMap, fmt::Debug, iter::Peekable, usize};
 use unicode_segmentation::UnicodeSegmentation;
 use value::{check_type, Type};
 
@@ -9,12 +9,12 @@ use crate::value::{cast_type, Value};
 use log::debug;
 
 #[derive(Debug, PartialEq)]
-pub enum Error {
+pub enum Error<'a> {
     UnknownArg(String),
     InvalidArg,
-    MissingRequiredArgs(Vec<String>),
+    MissingRequiredArgs(Vec<&'a str>),
     // @todo: lets avoid exposing Value here
-    WrongNumValues(String, NumValues, Value),
+    WrongNumValues(&'a str, &'a NumValues, Value),
     WrongValueType(Value),
     WrongCastType(String),
     InvalidValue(String, String),
@@ -69,7 +69,7 @@ struct Args<'a, T> {
     subcommands: Vec<Args<'a, T>>,
     // handler to invoke when this command has been found.
     // This is not called if a subcommand is invoked
-    handler: fn(Results) -> T,
+    handler: fn(Results<'a>) -> T,
 }
 
 impl<'a, T: Default> std::default::Default for Args<'a, T> {
@@ -87,13 +87,13 @@ impl<'a, T: Default> std::default::Default for Args<'a, T> {
 }
 
 #[derive(Debug)]
-struct Results {
-    params: HashMap<String, Value>,
+struct Results<'a> {
+    params: HashMap<&'a str, Value>,
     unknown_params: Vec<String>,
     positional: Vec<String>,
 }
 
-impl std::default::Default for Results {
+impl<'a> std::default::Default for Results<'a> {
     fn default() -> Self {
         Results {
             params: Default::default(),
@@ -105,12 +105,12 @@ impl std::default::Default for Results {
 
 impl<'a, R> Args<'a, R> {
     #[allow(dead_code)]
-    pub fn parse_str<'b, T: IntoIterator<Item = &'b str>>(&self, args: T) -> Result<R, Error> {
+    pub fn parse_str<'b, T: IntoIterator<Item = &'b str>>(&'a self, args: T) -> Result<R, Error> {
         self.parse(args.into_iter().map(|a| a.to_string()))
     }
 
     #[allow(dead_code)]
-    pub fn parse<T: Iterator<Item = String>>(&self, args: T) -> Result<R, Error> {
+    pub fn parse<T: Iterator<Item = String>>(&'a self, args: T) -> Result<R, Error> {
         debug!("starting arg parsing");
         let mut command = self;
         let mut args = args.skip(1).peekable();
@@ -140,11 +140,6 @@ impl<'a, R> Args<'a, R> {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn env(self) -> Result<R, Error> {
-        self.parse(env::args())
-    }
-
     fn generate_help(&self) -> Value {
         Value::None
     }
@@ -159,7 +154,7 @@ impl<'a, R> Args<'a, R> {
             if param.starts_with("-") {
                 break;
             }
-            let mut val = cast_type(target, param.to_string())?;
+            let mut val = cast_type(target, param)?;
             if let Some(validation) = arg.validation {
                 debug!("running validation for {:?}", val);
                 val = match validation(val) {
@@ -189,7 +184,7 @@ impl<'a, R> Args<'a, R> {
                 break;
             }
             j += 1;
-            let mut val = cast_type(target, param.to_string())?;
+            let mut val = cast_type(target, param)?;
             if let Some(validation) = arg.validation {
                 debug!("running validation for {:?}", val);
                 val = match validation(val) {
@@ -207,7 +202,7 @@ impl<'a, R> Args<'a, R> {
         Ok(params)
     }
 
-    fn get_values<T>(&self, arg: &Arg, args: &mut Peekable<T>) -> Result<Value, Error>
+    fn get_values<T>(&'a self, arg: &'a Arg, args: &mut Peekable<T>) -> Result<Value, Error>
     where
         T: Iterator<Item = String>,
     {
@@ -221,7 +216,7 @@ impl<'a, R> Args<'a, R> {
                     Ok(params.into())
                 } else {
                     debug!("too few values found, expected {}, got {}: {:?}", i, params.len(), params);
-                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
+                    Err(Error::WrongNumValues(arg.name, &arg.num_values, Value::from(params)))
                 }
             }
             NumValues::Between(low, high) => {
@@ -237,7 +232,7 @@ impl<'a, R> Args<'a, R> {
                         params.len(),
                         params
                     );
-                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
+                    Err(Error::WrongNumValues(arg.name, &arg.num_values, Value::from(params)))
                 }
             }
             NumValues::Fixed(i) => {
@@ -245,7 +240,7 @@ impl<'a, R> Args<'a, R> {
                 let mut params = self.get_values_bounded(arg, args, i)?;
                 if params.len() != i {
                     debug!("wrong number of found, expected {}, got {}: {:?}", i, params.len(), params);
-                    Err(Error::WrongNumValues(arg.name.to_owned(), arg.num_values, Value::from(params)))
+                    Err(Error::WrongNumValues(arg.name, &arg.num_values, Value::from(params)))
                 } else if params.len() == 1 {
                     debug!("single param found, simplifying vec");
                     Ok(params.pop().unwrap())
@@ -257,37 +252,41 @@ impl<'a, R> Args<'a, R> {
         };
     }
 
-    fn handle_arg_inner<T>(&self, target: Option<&'a Arg>, arg: &str, args: &mut Peekable<T>, out: &mut HashMap<String, Value>) -> Result<(), Error>
-    where
-        T: Iterator<Item = String>,
-    {
-        match target {
-            Some(res) => {
-                debug!("found arg {} matching {}", res.name, arg);
-                out.insert(res.name.to_string(), self.get_values(res, args)?);
+    fn handle_arg_missing(&self, arg: &str, out: &mut HashMap<&'a str, Value>) -> Result<(), Error> {
+        match arg {
+            "--help" | "-h" => {
+                out.insert("help", self.generate_help());
                 Ok(())
             }
-            None => {
-                debug!("no arg found for {}, looking for default", arg);
-                match arg {
-                    "--help" | "-h" => {
-                        out.insert("help".to_string(), self.generate_help());
-                        Ok(())
-                    }
-                    _ => Err(Error::UnknownArg(arg.to_owned())),
-                }
-            }
+            _ => Err(Error::UnknownArg(arg.to_owned())),
         }
     }
 
-    fn handle_arg<T>(&self, arg: &str, args: &mut Peekable<T>, out: &mut HashMap<String, Value>) -> Result<(), Error>
+    fn handle_arg_inner<T>(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut HashMap<&'a str, Value>) -> Result<(), Error>
+    where
+        T: Iterator<Item = String>,
+    {
+        debug!("found arg {} matching {}", target.name, arg);
+        out.insert(target.name, self.get_values(target, args)?);
+        Ok(())
+    }
+
+    fn handle_arg<T>(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut HashMap<&'a str, Value>) -> Result<(), Error>
     where
         T: Iterator<Item = String>,
     {
         if arg.starts_with("--") {
             let arg = arg.trim_start_matches("--");
             debug!("handling long {}", arg);
-            self.handle_arg_inner(self.args.iter().find(|&a| a.long.iter().any(|&i| i == arg)), arg, args, out)
+
+            for a in &self.args {
+                for i in a.long {
+                    if i == arg {
+                        return self.handle_arg_inner(&a, arg, args, out);
+                    }
+                }
+            }
+            self.handle_arg_missing(arg, out)
         } else {
             let arg = arg.trim_start_matches("-");
             debug!("handling short(s) {}", arg);
@@ -301,7 +300,7 @@ impl<'a, R> Args<'a, R> {
                     debug!("no arg found for {}, looking for default", arg);
                     match arg {
                         "-h" => {
-                            out.insert("help".to_string(), self.generate_help());
+                            out.insert("help", self.generate_help());
                             Ok(())
                         }
                         _ => Err(Error::UnknownArg(arg.to_owned())),
@@ -309,12 +308,12 @@ impl<'a, R> Args<'a, R> {
                 }
                 1 => {
                     debug!("single short found {}, trying to expand", arg);
-                    self.handle_arg_inner(Some(matches[0]), arg, args, out)
+                    self.handle_arg_inner(matches[0], arg, args, out)
                 }
                 _ => {
                     debug!("flag combination found {}", arg);
                     for res in matches {
-                        out.insert(res.name.to_string(), Value::None);
+                        out.insert(res.name, Value::None);
                     }
                     Ok(())
                 }
@@ -322,10 +321,10 @@ impl<'a, R> Args<'a, R> {
         }
     }
 
-    fn apply<T: Iterator<Item = String>>(&self, args: T) -> Result<R, Error> {
+    fn apply<T: Iterator<Item = String>>(&'a self, args: T) -> Result<R, Error> {
         debug!("parsing args using command {}", self.name);
         // @todo: I wonder if we can avoid hashing with compile time magic?
-        let mut params: HashMap<String, Value> = HashMap::with_capacity(self.args.len());
+        let mut params: HashMap<&'a str, Value> = HashMap::with_capacity(self.args.len());
         let mut unknown_params = Vec::with_capacity(0);
         let mut positional = Vec::with_capacity(0);
         let mut args = args.peekable();
@@ -358,9 +357,9 @@ impl<'a, R> Args<'a, R> {
                 if let Some(default) = param.default {
                     debug!("using default value for {}", param.name);
                     let val = default();
-                    params.insert(param.name.to_owned(), check_type(&param.value_type, &val).map(|_| val)?);
+                    params.insert(param.name, check_type(&param.value_type, &val).map(|_| val)?);
                 } else if param.required {
-                    missing.push(param.name.to_string());
+                    missing.push(param.name);
                 }
             }
         }
@@ -434,7 +433,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            Err(Error::WrongNumValues("arg".to_owned(), NumValues::Fixed(1), Value::from(vec![]))),
+            Err(Error::WrongNumValues("arg", &NumValues::Fixed(1), Value::from(vec![]))),
             args.parse_str(vec!["prog", "--arg"])
         );
     });
@@ -629,7 +628,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(Err(Error::MissingRequiredArgs(vec!["arg".to_string()])), args.parse_str(vec!["prog"]));
+        assert_eq!(Err(Error::MissingRequiredArgs(vec!["arg"])), args.parse_str(vec!["prog"]));
     });
 
     test!(test_required_arg() {
@@ -659,7 +658,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Err(Error::WrongCastType("lol".to_string())), args.parse_str(vec!["prog", "--arg", "lol"]));
+        assert_eq!(Err(Error::WrongCastType("lol".to_owned())), args.parse_str(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_right_type_bool() {
@@ -791,7 +790,7 @@ mod tests {
             handler: |r| assert_has!(vec![&23], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Err(Error::WrongCastType("true".to_string())), args.parse_str(vec!["prog", "--arg", "true"]));
+        assert_eq!(Err(Error::WrongCastType("true".to_owned())), args.parse_str(vec!["prog", "--arg", "true"]));
     });
 
     test!(test_default_returns_wrong_type() {

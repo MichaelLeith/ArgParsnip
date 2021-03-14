@@ -14,3 +14,5 @@ unicode-segmentation = "1.7.1"
 pretty_assertions = "0.6.1"
 simple_logger = "1.11.0"
 
+#[profile.release]
+#lto = true

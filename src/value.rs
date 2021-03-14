@@ -39,9 +39,9 @@ macro_rules! converters {
         }
 
         impl std::convert::TryInto<$x> for Value {
-            type Error = Error;
+            type Error = Error<'static>;
 
-            fn try_into(self) -> Result<$x, Error> {
+            fn try_into(self) -> Result<$x, Self::Error> {
                 match self {
                     Value::$into(b) => Ok(b),
                     e => Err(Error::WrongValueType(e)),
@@ -50,9 +50,9 @@ macro_rules! converters {
         }
 
         impl<'a> std::convert::TryInto<&'a $x> for &'a Value {
-            type Error = Error;
+            type Error = Error<'static>;
 
-            fn try_into(self) -> Result<&'a $x, Error> {
+            fn try_into(self) -> Result<&'a $x, Self::Error> {
                 match self {
                     Value::$into(b) => Ok(b),
                     e => Err(Error::WrongValueType(e.clone())),
@@ -61,9 +61,9 @@ macro_rules! converters {
         }
 
         impl std::convert::TryInto<Vec<$x>> for Value {
-            type Error = Error;
+            type Error = Error<'static>;
 
-            fn try_into(self) -> Result<Vec<$x>, Error> {
+            fn try_into(self) -> Result<Vec<$x>, Self::Error> {
                 match self {
                     Value::Array(arr) => {
                         let mut vec = Vec::with_capacity(arr.len());
@@ -78,9 +78,9 @@ macro_rules! converters {
         }
 
         impl<'a> std::convert::TryInto<Vec<&'a $x>> for &'a Value {
-            type Error = Error;
+            type Error = Error<'static>;
 
-            fn try_into(self) -> Result<Vec<&'a $x>, Error> {
+            fn try_into(self) -> Result<Vec<&'a $x>, Self::Error> {
                 match self {
                     Value::Array(arr) => {
                         let mut vec = Vec::with_capacity(arr.len());
@@ -140,9 +140,9 @@ impl std::convert::Into<String> for Value {
 }
 
 impl<'a> std::convert::TryInto<&'a str> for &'a Value {
-    type Error = Error;
+    type Error = Error<'a>;
 
-    fn try_into(self) -> Result<&'a str, Error> {
+    fn try_into(self) -> Result<&'a str, Error<'a>> {
         match self {
             Value::String(b) => Ok(b),
             e => Err(Error::WrongValueType(e.clone())),
@@ -151,9 +151,9 @@ impl<'a> std::convert::TryInto<&'a str> for &'a Value {
 }
 
 impl<'a> std::convert::TryInto<Vec<&'a str>> for &'a Value {
-    type Error = Error;
+    type Error = Error<'a>;
 
-    fn try_into(self) -> Result<Vec<&'a str>, Error> {
+    fn try_into(self) -> Result<Vec<&'a str>, Error<'a>> {
         match self {
             Value::Array(arr) => {
                 let mut vec = Vec::with_capacity(arr.len());
@@ -175,11 +175,11 @@ impl std::convert::From<&str> for Value {
 
 macro_rules! cast {
     ($val:ident, $x:ty) => {
-        Value::from($val.parse::<$x>().map_err(|_| Error::WrongCastType($val))?)
+        Value::from($val.parse::<$x>().map_err(|_| Error::WrongCastType($val.to_owned()))?)
     };
 }
 
-pub(crate) fn check_type(t: &Type, val: &Value) -> Result<(), Error> {
+pub(crate) fn check_type(t: &Type, val: &Value) -> Result<(), Error<'static>> {
     match (t, val) {
         (Type::Any, _)
         | (Type::Bool, Value::Bool(_))
@@ -199,15 +199,14 @@ pub(crate) fn check_type(t: &Type, val: &Value) -> Result<(), Error> {
     }
 }
 
-pub(crate) fn cast_type(t: &Type, val: String) -> Result<Value, Error> {
+pub(crate) fn cast_type(t: &Type, val: &str) -> Result<Value, Error<'static>> {
     Ok(match t {
-        Type::Any => Value::from(val),
         Type::Bool => cast!(val, bool),
         Type::Int => cast!(val, i32),
         Type::Long => cast!(val, i64),
         Type::Float => cast!(val, f32),
         Type::Double => cast!(val, f64),
-        Type::String => Value::from(val),
+        Type::Any | Type::String => Value::from(val.clone()),
         Type::Array(arr) => Value::from(cast_type(arr, val)?),
     })
 }
