@@ -68,8 +68,9 @@ pub struct Arg<'a> {
 }
 
 #[derive(Debug)]
-pub struct Args<'a, T> {
+pub struct Args<'a, T = Results<'a>> {
     pub name: &'a str,
+    pub path: Option<&'a str>,
     pub version: &'a str,
     pub author: &'a str,
     pub about: &'a str,
@@ -80,10 +81,26 @@ pub struct Args<'a, T> {
     pub handler: fn(Results<'a>) -> T,
 }
 
+impl<'a> Default for Args<'a, Results<'a>> {
+    fn default() -> Self {
+        Args {
+            name: Default::default(),
+            path: Default::default(),
+            version: Default::default(),
+            author: Default::default(),
+            about: Default::default(),
+            args: Default::default(),
+            subcommands: Default::default(),
+            handler: |h| h,
+        }
+    }
+}
+
 impl<'a, T: Default> Default for Args<'a, T> {
     fn default() -> Self {
         Args {
             name: Default::default(),
+            path: Default::default(),
             version: Default::default(),
             author: Default::default(),
             about: Default::default(),
@@ -94,21 +111,12 @@ impl<'a, T: Default> Default for Args<'a, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Results<'a> {
+    pub path: &'a str,
     pub params: HashMap<&'a str, Value>,
     pub unknown_params: Vec<String>,
     pub positional: Vec<String>,
-}
-
-impl<'a> Default for Results<'a> {
-    fn default() -> Self {
-        Results {
-            params: Default::default(),
-            unknown_params: Default::default(),
-            positional: Default::default(),
-        }
-    }
 }
 
 impl<'a, R> Args<'a, R> {
@@ -376,6 +384,7 @@ impl<'a, R> Args<'a, R> {
             return Err(Error::MissingRequiredArgs(missing));
         }
         Ok((self.handler)(Results {
+            path: self.path.unwrap_or(self.name),
             params,
             unknown_params,
             positional,
@@ -385,9 +394,9 @@ impl<'a, R> Args<'a, R> {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryInto, sync::Once};
+    use std::{collections::HashMap, convert::TryInto, sync::Once};
 
-    use crate::{value::Type, Arg, Args, Error, NumValues, Value};
+    use crate::{value::Type, Arg, Args, Error, NumValues, Results, Value};
     use pretty_assertions::assert_eq;
     use simple_logger::SimpleLogger;
 
@@ -404,6 +413,7 @@ mod tests {
             }
         };
     }
+
     macro_rules! assert_has {
         ($expected:expr, $results:ident, $key:literal) => {
             if let Some(arg) = $results.params.get($key) {
@@ -414,6 +424,32 @@ mod tests {
             }
         };
     }
+
+    test!(test_returning_results() {
+        let args = Args {
+            subcommands: vec![Args {
+                name: "sub",
+                path: Some("main/sub"),
+                args: vec![Arg {
+                    name: "arg",
+                    long: Some("arg"),
+                    num_values: NumValues::None,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut params = HashMap::with_capacity(1);
+        params.insert("arg", Value::None);
+
+        assert_eq!(Ok(Results {
+            path: "main/sub",
+            params,
+            unknown_params: vec!["u".to_string()],
+            positional: vec!["lol".to_string()],
+        }), args.parse_str(vec!["prog", "sub", "--arg", "lol", "-u"]));
+    });
 
     test!(test_arg_with_no_value() {
         let args = Args {
