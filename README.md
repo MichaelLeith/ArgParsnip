@@ -21,11 +21,8 @@ A small Argparser
 ** Support positional arguments
 ** Support repeat arguments
 ** Bash/Zsh completion
-** -o=foo
-** -o=foo,bar
 ** Combinations (e.g only allow arg A if arg B)
 ** Value Ranges
-** Json args?
 ** Colours!
 ** Support disabling arg override
 
