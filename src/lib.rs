@@ -907,4 +907,17 @@ mod tests {
         };
         assert_eq!(Ok(true), args.parse_str(vec!["prog", "--", "-a"]));
     });
+
+    test!(test_sub_commands_after_arg_is_not_called() {
+        let args = Args {
+            subcommands: vec![Args {
+                name: "sub",
+                handler: |_| 1,
+                ..Default::default()
+            }],
+            handler: |_| 0,
+            ..Default::default()
+        };
+        assert_eq!(Ok(0), args.parse_str(vec!["prog", "-arg", "sub"]));
+    });
 }
