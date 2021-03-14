@@ -1,10 +1,18 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+mod std;
+
 mod value;
 
-use std::{collections::HashMap, fmt::Debug, iter::Peekable, usize};
-use unicode_segmentation::UnicodeSegmentation;
-use value::{check_type, Type};
+use std::collections::HashMap;
+use std::iter::Peekable;
+use std::string::String;
+use std::vec::Vec;
 
-use crate::value::{cast_type, Value};
+use crate::value::{cast_type, check_type, Type, Value};
+use unicode_segmentation::UnicodeSegmentation;
 
 use log::debug;
 
@@ -37,42 +45,42 @@ impl Default for NumValues {
 }
 
 #[derive(Debug, Default)]
-struct Arg<'a> {
+pub struct Arg<'a> {
     // unique key to identify this arg
-    name: &'a str,
+    pub name: &'a str,
     // aliases we'll match this arg with e.g -t --test
-    short: Option<&'a str>,
-    long: Option<&'a str>,
+    pub short: Option<&'a str>,
+    pub long: Option<&'a str>,
     // info about this arg
-    about: &'a str,
+    pub about: &'a str,
     // number of parameters this arg accepts
-    num_values: NumValues,
+    pub num_values: NumValues,
     // name for the value of this arg in --help
-    value_name: Option<&'a str>,
+    pub value_name: Option<&'a str>,
     // default value for this arg
-    default: Option<fn() -> Value>,
+    pub default: Option<fn() -> Value>,
     // whether this arg is required
-    required: bool,
+    pub required: bool,
     // type for values
-    value_type: Type,
+    pub value_type: Type,
     // @todo: can we provide a default and avoid the Option?
-    validation: Option<fn(Value) -> Result<Value, String>>,
+    pub validation: Option<fn(Value) -> Result<Value, String>>,
 }
 
 #[derive(Debug)]
-struct Args<'a, T> {
-    name: &'a str,
-    version: &'a str,
-    author: &'a str,
-    about: &'a str,
-    args: Vec<Arg<'a>>,
-    subcommands: Vec<Args<'a, T>>,
+pub struct Args<'a, T> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub author: &'a str,
+    pub about: &'a str,
+    pub args: Vec<Arg<'a>>,
+    pub subcommands: Vec<Args<'a, T>>,
     // handler to invoke when this command has been found.
     // This is not called if a subcommand is invoked
-    handler: fn(Results<'a>) -> T,
+    pub handler: fn(Results<'a>) -> T,
 }
 
-impl<'a, T: Default> std::default::Default for Args<'a, T> {
+impl<'a, T: Default> Default for Args<'a, T> {
     fn default() -> Self {
         Args {
             name: Default::default(),
@@ -87,13 +95,13 @@ impl<'a, T: Default> std::default::Default for Args<'a, T> {
 }
 
 #[derive(Debug)]
-struct Results<'a> {
-    params: HashMap<&'a str, Value>,
-    unknown_params: Vec<String>,
-    positional: Vec<String>,
+pub struct Results<'a> {
+    pub params: HashMap<&'a str, Value>,
+    pub unknown_params: Vec<String>,
+    pub positional: Vec<String>,
 }
 
-impl<'a> std::default::Default for Results<'a> {
+impl<'a> Default for Results<'a> {
     fn default() -> Self {
         Results {
             params: Default::default(),
@@ -106,7 +114,7 @@ impl<'a> std::default::Default for Results<'a> {
 impl<'a, R> Args<'a, R> {
     #[allow(dead_code)]
     pub fn parse_str<'b, T: IntoIterator<Item = &'b str>>(&'a self, args: T) -> Result<R, Error> {
-        self.parse(args.into_iter().map(|a| a.to_string()))
+        self.parse(args.into_iter().map(|a| String::from(a)))
     }
 
     #[allow(dead_code)]
@@ -258,7 +266,7 @@ impl<'a, R> Args<'a, R> {
                 out.insert("help", self.generate_help());
                 Ok(())
             }
-            _ => Err(Error::UnknownArg(arg.to_owned())),
+            _ => Err(Error::UnknownArg(String::from(arg))),
         }
     }
 
@@ -303,7 +311,7 @@ impl<'a, R> Args<'a, R> {
                             out.insert("help", self.generate_help());
                             Ok(())
                         }
-                        _ => Err(Error::UnknownArg(arg.to_owned())),
+                        _ => Err(Error::UnknownArg(String::from(arg))),
                     }
                 }
                 1 => {

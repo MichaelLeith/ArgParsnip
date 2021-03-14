@@ -1,5 +1,7 @@
 use crate::Error;
 
+use std::convert::TryInto;
+
 #[derive(Debug, PartialEq)]
 pub enum Type {
     Any,
@@ -32,13 +34,13 @@ pub enum Value {
 
 macro_rules! converters {
     ($x:ty, $into:ident) => {
-        impl std::convert::From<$x> for Value {
+        impl From<$x> for Value {
             fn from(val: $x) -> Self {
                 Value::$into(val)
             }
         }
 
-        impl std::convert::TryInto<$x> for Value {
+        impl TryInto<$x> for Value {
             type Error = Error<'static>;
 
             fn try_into(self) -> Result<$x, Self::Error> {
@@ -49,7 +51,7 @@ macro_rules! converters {
             }
         }
 
-        impl<'a> std::convert::TryInto<&'a $x> for &'a Value {
+        impl<'a> TryInto<&'a $x> for &'a Value {
             type Error = Error<'static>;
 
             fn try_into(self) -> Result<&'a $x, Self::Error> {
@@ -60,7 +62,7 @@ macro_rules! converters {
             }
         }
 
-        impl std::convert::TryInto<Vec<$x>> for Value {
+        impl TryInto<Vec<$x>> for Value {
             type Error = Error<'static>;
 
             fn try_into(self) -> Result<Vec<$x>, Self::Error> {
@@ -77,7 +79,7 @@ macro_rules! converters {
             }
         }
 
-        impl<'a> std::convert::TryInto<Vec<&'a $x>> for &'a Value {
+        impl<'a> TryInto<Vec<&'a $x>> for &'a Value {
             type Error = Error<'static>;
 
             fn try_into(self) -> Result<Vec<&'a $x>, Self::Error> {
@@ -103,13 +105,13 @@ converters!(f32, Float);
 converters!(f64, Double);
 converters!(Vec<Value>, Array);
 
-impl std::convert::From<String> for Value {
+impl From<String> for Value {
     fn from(val: String) -> Self {
         Value::String(val)
     }
 }
 
-impl<'a> std::convert::Into<String> for &'a Value {
+impl<'a> Into<String> for &'a Value {
     fn into(self) -> String {
         match self {
             Value::String(v) => v.clone(),
@@ -124,7 +126,7 @@ impl<'a> std::convert::Into<String> for &'a Value {
     }
 }
 
-impl std::convert::Into<String> for Value {
+impl Into<String> for Value {
     fn into(self) -> String {
         match self {
             Value::String(v) => v,
@@ -139,7 +141,7 @@ impl std::convert::Into<String> for Value {
     }
 }
 
-impl<'a> std::convert::TryInto<&'a str> for &'a Value {
+impl<'a> TryInto<&'a str> for &'a Value {
     type Error = Error<'a>;
 
     fn try_into(self) -> Result<&'a str, Error<'a>> {
@@ -150,7 +152,7 @@ impl<'a> std::convert::TryInto<&'a str> for &'a Value {
     }
 }
 
-impl<'a> std::convert::TryInto<Vec<&'a str>> for &'a Value {
+impl<'a> TryInto<Vec<&'a str>> for &'a Value {
     type Error = Error<'a>;
 
     fn try_into(self) -> Result<Vec<&'a str>, Error<'a>> {
@@ -167,15 +169,15 @@ impl<'a> std::convert::TryInto<Vec<&'a str>> for &'a Value {
     }
 }
 
-impl std::convert::From<&str> for Value {
+impl From<&str> for Value {
     fn from(val: &str) -> Self {
-        Value::String(val.to_string())
+        Value::String(String::from(val))
     }
 }
 
 macro_rules! cast {
     ($val:ident, $x:ty) => {
-        Value::from($val.parse::<$x>().map_err(|_| Error::WrongCastType($val.to_owned()))?)
+        Value::from($val.parse::<$x>().map_err(|_| Error::WrongCastType(String::from($val)))?)
     };
 }
 

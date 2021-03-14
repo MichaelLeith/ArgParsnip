@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 log = "0.4.14"
 unicode-segmentation = "1.7.1"
+hashbrown = {version = "0.9.1", default-features = false, optional = true}
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
@@ -16,3 +17,18 @@ simple_logger = "1.11.0"
 
 #[profile.release]
 #lto = true
+
+[features]
+default = ["std"]
+std = []
+no-std = ["hashbrown"]
+
+[workspace]
+members = [
+    ".",
+    "no-std-test"
+]
+default-members = [
+    ".",
+    "no-std-test"
+]
