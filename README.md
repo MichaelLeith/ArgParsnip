@@ -21,7 +21,6 @@ A small Argparser
 ** Support positional arguments
 ** Support repeat arguments
 ** Bash/Zsh completion
-** Flag combinations (e.g -rli)
 ** -o=foo
 ** -o=foo,bar
 ** Combinations (e.g only allow arg A if arg B)
