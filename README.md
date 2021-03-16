@@ -22,5 +22,4 @@ A small Argparser
 ** Bash/Zsh completion
 ** Combinations (e.g only allow arg A if arg B)
 ** Colours!
-** Support disabling arg override
 

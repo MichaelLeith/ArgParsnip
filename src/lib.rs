@@ -26,6 +26,7 @@ pub enum Error<'a> {
     WrongValueType(Value),
     WrongCastType(String),
     InvalidValue(String, String),
+    Override(&'a str),
 }
 
 #[allow(dead_code)]
@@ -75,6 +76,7 @@ pub struct Args<'a, T = Results<'a>> {
     pub author: &'a str,
     pub about: &'a str,
     pub args: Vec<Arg<'a>>,
+    pub disable_overrides: bool,
     pub subcommands: Vec<Args<'a, T>>,
     // handler to invoke when this command has been found.
     // This is not called if a subcommand is invoked
@@ -90,6 +92,7 @@ impl<'a> Default for Args<'a, Results<'a>> {
             author: Default::default(),
             about: Default::default(),
             args: Default::default(),
+            disable_overrides: Default::default(),
             subcommands: Default::default(),
             handler: |h| h,
         }
@@ -105,6 +108,7 @@ impl<'a, T: Default> Default for Args<'a, T> {
             author: Default::default(),
             about: Default::default(),
             args: Default::default(),
+            disable_overrides: Default::default(),
             subcommands: Default::default(),
             handler: |_| Default::default(),
         }
@@ -268,12 +272,17 @@ impl<'a, R> Args<'a, R> {
         };
     }
 
+    fn try_insert(&self, key: &'a str, value: Value, out: &mut HashMap<&'a str, Value>) -> Result<(), Error> {
+        if self.disable_overrides && out.contains_key(key) {
+            return Err(Error::Override(key));
+        }
+        out.insert(key, value);
+        Ok(())
+    }
+
     fn handle_arg_missing(&self, arg: &str, out: &mut HashMap<&'a str, Value>) -> Result<(), Error> {
         match arg {
-            "--help" | "-h" => {
-                out.insert("help", self.generate_help());
-                Ok(())
-            }
+            "--help" | "-h" => self.try_insert("help", self.generate_help(), out),
             _ => Err(Error::UnknownArg(String::from(arg))),
         }
     }
@@ -283,8 +292,7 @@ impl<'a, R> Args<'a, R> {
         T: Iterator<Item = String>,
     {
         debug!("found arg {} matching {}", target.name, arg);
-        out.insert(target.name, self.get_values(target, args)?);
-        Ok(())
+        self.try_insert(target.name, self.get_values(target, args)?, out)
     }
 
     fn handle_arg<T>(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut HashMap<&'a str, Value>) -> Result<(), Error>
@@ -314,13 +322,7 @@ impl<'a, R> Args<'a, R> {
             match matches.len() {
                 0 => {
                     debug!("no arg found for {}, looking for default", arg);
-                    match arg {
-                        "-h" => {
-                            out.insert("help", self.generate_help());
-                            Ok(())
-                        }
-                        _ => Err(Error::UnknownArg(String::from(arg))),
-                    }
+                    self.handle_arg_missing(arg, out)
                 }
                 1 => {
                     debug!("single short found {}, trying to expand", arg);
@@ -329,7 +331,7 @@ impl<'a, R> Args<'a, R> {
                 _ => {
                     debug!("flag combination found {}", arg);
                     for res in matches {
-                        out.insert(res.name, Value::None);
+                        self.try_insert(res.name, Value::None, out)?;
                     }
                     Ok(())
                 }
@@ -1077,5 +1079,20 @@ mod tests {
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
             args.parse_str(vec!["prog", "-a", "abcdef"]));
+    });
+
+    test!(test_fail_duplicate_arg() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::Override("arg")), args.parse_str(vec!["prog", "-a", "--arg"]));
     });
 }
