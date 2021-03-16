@@ -4,6 +4,9 @@ extern crate alloc;
 #[cfg(not(feature = "std"))]
 mod std;
 
+#[cfg(feature = "derive")]
+use serde::{Deserialize, Serialize};
+
 mod value;
 
 use std::collections::HashMap;
@@ -31,6 +34,7 @@ pub enum Error<'a> {
 
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
 pub enum NumValues {
     None,
     Fixed(usize),
@@ -46,60 +50,84 @@ impl Default for NumValues {
 }
 
 #[derive(Debug, Default)]
+#[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Arg<'a> {
     // unique key to identify this arg
     pub name: &'a str,
     // aliases we'll match this arg with e.g -t --test
+    #[cfg_attr(feature = "derive", serde(default))]
     pub short: Option<&'a str>,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub long: Option<&'a str>,
     // info about this arg
+    #[cfg_attr(feature = "derive", serde(default))]
     pub about: &'a str,
     // number of parameters this arg accepts
+    #[cfg_attr(feature = "derive", serde(default))]
     pub num_values: NumValues,
     // name for the value of this arg in --help
+    #[cfg_attr(feature = "derive", serde(default))]
     pub value_name: Option<&'a str>,
     // default value for this arg
+    #[cfg_attr(feature = "derive", serde(skip, default))]
     pub default: Option<fn() -> Value>,
     // whether this arg is required
+    #[cfg_attr(feature = "derive", serde(default))]
     pub required: bool,
     // type for values
+    #[cfg_attr(feature = "derive", serde(default))]
     pub value_type: Type,
+    #[cfg_attr(feature = "derive", serde(skip, default))]
     // @todo: can we provide a default and avoid the Option?
     pub validation: Option<fn(Value) -> Result<Value, String>>,
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Args<'a, T = Results<'a>> {
+    #[cfg_attr(feature = "derive", serde(default))]
     pub name: &'a str,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub path: Option<&'a str>,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub version: &'a str,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub author: &'a str,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub about: &'a str,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub args: Vec<Arg<'a>>,
+    #[cfg_attr(feature = "derive", serde(default))]
     pub disable_overrides: bool,
+    #[cfg_attr(feature = "derive", serde(default = "default_vec"))]
     pub subcommands: Vec<Args<'a, T>>,
     // handler to invoke when this command has been found.
     // This is not called if a subcommand is invoked
+    #[cfg_attr(feature = "derive", serde(skip, bound(deserialize = "T: Handler<'a, T>"), default = "T::handler"))]
     pub handler: fn(Results<'a>) -> T,
 }
 
-impl<'a> Default for Args<'a, Results<'a>> {
-    fn default() -> Self {
-        Args {
-            name: Default::default(),
-            path: Default::default(),
-            version: Default::default(),
-            author: Default::default(),
-            about: Default::default(),
-            args: Default::default(),
-            disable_overrides: Default::default(),
-            subcommands: Default::default(),
-            handler: |h| h,
-        }
+fn default_vec<'a, T>() -> Vec<Args<'a, T>> {
+    vec![]
+}
+pub trait Handler<'a, T> {
+    fn handler() -> fn(Results<'a>) -> T;
+}
+
+// @todo: I don't like havingthis but we can't have negative constraints :/
+impl<'a, T: Default> Handler<'a, T> for T {
+    fn handler() -> fn(Results<'a>) -> Self {
+        |_| Default::default()
     }
 }
 
-impl<'a, T: Default> Default for Args<'a, T> {
+impl<'a> Handler<'a, Results<'a>> for Results<'a> {
+    fn handler() -> fn(Results<'a>) -> Self {
+        |results| results
+    }
+}
+
+impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
     fn default() -> Self {
         Args {
             name: Default::default(),
@@ -110,12 +138,13 @@ impl<'a, T: Default> Default for Args<'a, T> {
             args: Default::default(),
             disable_overrides: Default::default(),
             subcommands: Default::default(),
-            handler: |_| Default::default(),
+            handler: T::handler(),
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Results<'a> {
     pub path: &'a str,
     pub params: HashMap<&'a str, Value>,

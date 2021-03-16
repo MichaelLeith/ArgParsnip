@@ -2,7 +2,11 @@ use crate::Error;
 
 use std::convert::TryInto;
 
+#[cfg(feature = "derive")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
 pub enum Type {
     Any,
     Bool,
@@ -21,6 +25,7 @@ impl Default for Type {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
 pub enum Value {
     None,
     Bool(bool),
