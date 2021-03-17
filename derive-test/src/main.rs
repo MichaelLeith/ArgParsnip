@@ -1,5 +1,22 @@
+use parsnip::Args;
+
 fn main() {
-    println!("Hello, world!");
+    let data = r#"
+    {
+        "subcommands": [{
+            "name": "sub",
+            "path": "main/sub",
+            "args": [{
+                "name": "arg",
+                "long": "arg",
+                "num_values": "None"
+            }]
+        }]
+    }"#;
+
+    // Parse the string of data into serde_json::Value.
+    let args: Args = serde_json::from_str(data).unwrap();
+    println!("{:?}", args);
 }
 
 #[cfg(test)]
