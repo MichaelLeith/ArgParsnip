@@ -1,6 +1,6 @@
 use crate::Error;
 
-use std::convert::TryInto;
+use std::{convert::TryInto, fmt::Debug};
 
 #[cfg(feature = "derive")]
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,7 @@ impl Default for Type {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 #[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
 pub enum Value {
     None,
@@ -35,6 +35,21 @@ pub enum Value {
     Double(f64),
     String(String),
     Array(Vec<Value>),
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::None => Debug::fmt(&(), f),
+            Value::Bool(b) => Debug::fmt(b, f),
+            Value::Int(b) => Debug::fmt(b, f),
+            Value::Long(b) => Debug::fmt(b, f),
+            Value::Float(b) => Debug::fmt(b, f),
+            Value::Double(b) => Debug::fmt(b, f),
+            Value::String(b) => Debug::fmt(b, f),
+            Value::Array(b) => Debug::fmt(b, f),
+        }
+    }
 }
 
 macro_rules! converters {

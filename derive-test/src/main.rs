@@ -9,7 +9,7 @@ fn main() {
             "args": [{
                 "name": "arg",
                 "long": "arg",
-                "num_values": "None"
+                "num_values": "Any"
             }]
         }]
     }"#;
@@ -17,6 +17,7 @@ fn main() {
     // Parse the string of data into serde_json::Value.
     let args: Args = serde_json::from_str(data).unwrap();
     println!("{:?}", args);
+    println!("{:?}", args.parse(std::env::args()));
 }
 
 #[cfg(test)]
