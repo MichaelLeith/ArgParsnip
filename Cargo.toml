@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4.14"
+# @todo: support ascii only
 unicode-segmentation = "1.7.1"
 hashbrown = {version = "0.9.1", default-features = false, optional = true}
 serde = { version = "1.0", features = ["derive"], default-features = false, optional = true}
@@ -15,9 +16,12 @@ serde = { version = "1.0", features = ["derive"], default-features = false, opti
 [dev-dependencies]
 pretty_assertions = "0.6.1"
 simple_logger = "1.11.0"
+criterion = { version = "0.3.4", features = ["html_reports"] }
+pprof = { version = "0.4.3", features = ["flamegraph", "criterion"] }
 
-#[profile.release]
-#lto = true
+[profile.release]
+lto = true
+codegen-units = 1
 
 [features]
 default = ["std"]
@@ -36,3 +40,17 @@ default-members = [
     "no-std-test",
     "derive-test"
 ]
+
+# Benchmarks
+
+[[bench]]
+name = "default"
+harness = false
+
+[[bench]]
+name = "simple"
+harness = false
+
+[[bench]]
+name = "complex"
+harness = false

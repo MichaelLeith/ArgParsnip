@@ -148,16 +148,7 @@ impl<'a> Into<String> for &'a Value {
 
 impl Into<String> for Value {
     fn into(self) -> String {
-        match self {
-            Value::String(v) => v,
-            Value::None => "".to_string(),
-            Value::Bool(v) => v.to_string(),
-            Value::Int(v) => v.to_string(),
-            Value::Long(v) => v.to_string(),
-            Value::Float(v) => v.to_string(),
-            Value::Double(v) => v.to_string(),
-            Value::Array(v) => v.iter().map(|v| -> String { v.into() }).collect::<String>(),
-        }
+        (&self).into()
     }
 }
 
@@ -201,7 +192,7 @@ macro_rules! cast {
     };
 }
 
-pub(crate) fn check_type(t: &Type, val: &Value) -> Result<(), Error<'static>> {
+pub(crate) fn check_type(t: &Type, val: &Value) -> bool {
     match (t, val) {
         (Type::Any, _)
         | (Type::Bool, Value::Bool(_))
@@ -209,15 +200,9 @@ pub(crate) fn check_type(t: &Type, val: &Value) -> Result<(), Error<'static>> {
         | (Type::Long, Value::Long(_))
         | (Type::Float, Value::Float(_))
         | (Type::Double, Value::Double(_))
-        | (Type::String, Value::String(_)) => Ok(()),
-        (Type::Array(a), Value::Array(v)) => {
-            if v.iter().all(|s| check_type(a, s).is_ok()) {
-                Ok(())
-            } else {
-                Err(Error::WrongValueType(val.clone()))
-            }
-        }
-        _ => Err(Error::WrongValueType(val.clone())),
+        | (Type::String, Value::String(_)) => true,
+        (Type::Array(a), Value::Array(v)) => v.iter().all(|s| check_type(a, s)),
+        _ => false,
     }
 }
 

@@ -18,6 +18,6 @@ mod test {
             handler: |r| if r.flags.contains_key("arg") { 1 } else { 0 },
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg"]));
     }
 }

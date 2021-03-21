@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 
 mod value;
 
-use std::collections::HashMap;
+use std::collections::{
+    hash_map::Entry::{Occupied, Vacant},
+    HashMap,
+};
 use std::iter::Peekable;
 use std::string::String;
 use std::vec::Vec;
@@ -30,6 +33,7 @@ pub enum Error<'a> {
     WrongCastType(String),
     InvalidValue(String, String),
     Override(&'a str),
+    BadInput,
 }
 
 #[allow(dead_code)]
@@ -49,10 +53,9 @@ impl Default for NumValues {
     }
 }
 
-#[derive(Debug, Default)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Arg<'a> {
-    // unique key to identify this arg
+    // unique key (per Args) to identify this arg
     pub name: &'a str,
     // aliases we'll match this arg with e.g -t --test
     #[cfg_attr(feature = "derive", serde(default))]
@@ -77,9 +80,75 @@ pub struct Arg<'a> {
     // type for values
     #[cfg_attr(feature = "derive", serde(default))]
     pub value_type: Type,
-    #[cfg_attr(feature = "derive", serde(skip, default))]
+    #[cfg_attr(feature = "derive", serde(skip, default = "default_validation"))]
     // @todo: can we provide a default and avoid the Option?
-    pub validation: Option<fn(Value) -> Result<Value, String>>,
+    pub validation: fn(&Value) -> Result<(), String>,
+}
+
+fn default_validation() -> fn(&Value) -> Result<(), String> {
+    |_| Ok(())
+}
+
+impl<'a> std::default::Default for Arg<'a> {
+    fn default() -> Self {
+        Arg {
+            name: Default::default(),
+            short: Default::default(),
+            long: Default::default(),
+            about: Default::default(),
+            num_values: Default::default(),
+            value_name: Default::default(),
+            default: Default::default(),
+            required: Default::default(),
+            value_type: Default::default(),
+            validation: default_validation(),
+        }
+    }
+}
+
+impl<'a> std::fmt::Debug for Arg<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+#[cfg_attr(feature = "derive", derive(Deserialize))]
+pub enum FilterType {
+    All,
+    Any,
+}
+
+#[derive(Default, Debug)]
+#[cfg_attr(feature = "derive", derive(Deserialize))]
+pub struct Filters<'a> {
+    #[cfg_attr(feature = "derive", serde(default))]
+    pub filter_type: FilterType,
+    #[cfg_attr(feature = "derive", serde(default, borrow))]
+    pub filters: Vec<Filter<'a>>,
+}
+
+#[derive(Default, Debug)]
+#[cfg_attr(feature = "derive", derive(Deserialize))]
+pub struct Filter<'a> {
+    #[cfg_attr(feature = "derive", serde(default))]
+    pub inverse: bool,
+    #[cfg_attr(feature = "derive", serde(default))]
+    pub filter_type: FilterType,
+    #[cfg_attr(feature = "derive", serde(default, borrow))]
+    pub props: Vec<&'a str>,
+}
+
+impl<'a> Filter<'a> {
+    fn test(&self, builder: &Builder<'a>) -> usize {
+        1
+    }
+}
+
+impl Default for FilterType {
+    fn default() -> Self {
+        FilterType::Any
+    }
 }
 
 #[derive(Debug)]
@@ -105,12 +174,15 @@ pub struct Args<'a, T = Results<'a>> {
     // This is not called if a subcommand is invoked
     #[cfg_attr(feature = "derive", serde(skip, bound(deserialize = "T: Handler<'a, T>"), default = "T::handler"))]
     pub handler: fn(Results<'a>) -> T,
+    #[cfg_attr(feature = "derive", serde(default))]
+    pub filters: Filters<'a>,
 }
 
 #[cfg(feature = "derive")]
 fn default_vec<'a, T>() -> Vec<Args<'a, T>> {
     vec![]
 }
+
 pub trait Handler<'a, T> {
     fn handler() -> fn(Results<'a>) -> T;
 }
@@ -140,6 +212,7 @@ impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
             disable_overrides: Default::default(),
             subcommands: Default::default(),
             handler: T::handler(),
+            filters: Default::default(),
         }
     }
 }
@@ -148,7 +221,6 @@ impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Results<'a> {
     pub path: &'a str,
-    // NumValues::None
     pub flags: HashMap<&'a str, i32>,
     pub params: HashMap<&'a str, Value>,
     pub unknown_params: Vec<String>,
@@ -161,67 +233,64 @@ struct Builder<'a> {
     params: HashMap<&'a str, Value>,
 }
 
+pub trait IntoStr {
+    fn into(&self) -> &str;
+}
+
+impl IntoStr for &str {
+    fn into(&self) -> &str {
+        self
+    }
+}
+
+impl IntoStr for String {
+    fn into(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl<'a, R> Args<'a, R> {
     #[allow(dead_code)]
-    pub fn parse_str<'b, T: IntoIterator<Item = &'b str>>(&'a self, args: T) -> Result<R, Error> {
-        self.parse(args.into_iter().map(|a| String::from(a)))
-    }
-
-    #[allow(dead_code)]
-    pub fn parse<T: Iterator<Item = String>>(&'a self, args: T) -> Result<R, Error> {
+    pub fn parse<S: IntoStr, T: IntoIterator<Item = S>>(&'a self, args: T) -> Result<R, Error<'a>> {
         debug!("starting arg parsing");
         let mut command = self;
-        let mut args = args.skip(1).peekable();
-        loop {
-            if let Some(arg) = args.peek() {
-                debug!("checking if {} is a subcommand of {}", arg, command.name);
-                let res = command.subcommands.iter().find(|&i| i.name == arg);
-                match res {
-                    Some(arg) => {
-                        // now we need to actually take what was peeked
-                        args.next();
-                        command = arg;
-                    }
-                    None => {
-                        debug!("{} is not a subcommand, checking if there is a default", arg);
-                        match arg.as_str() {
-                            // @todo
-                            "help" => {}
-                            _ => return command.apply(args),
-                        }
-                    }
-                };
+        let mut args = args.into_iter().skip(1).peekable();
+        while let Some(arg) = args.peek() {
+            let arg = arg.into();
+            debug!("checking if {} is a subcommand of {}", arg, command.name);
+            if let Some(arg) = command.subcommands.iter().find(|&i| i.name == arg) {
+                // now we need to actually take what was peeked
+                args.next();
+                command = arg;
+            } else if arg == "help" {
+                // @todo
             } else {
-                debug!("applying command {}", command.name);
                 return command.apply(args);
             }
         }
+        debug!("applying command {}", command.name);
+        return command.apply(args);
     }
 
     fn generate_help(&self) -> Value {
         Value::None
     }
 
-    fn get_values_unbounded<T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
+    fn get_values_unbounded<S, T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
     where
-        T: Iterator<Item = String>,
+        S: IntoStr,
+        T: Iterator<Item = S>,
     {
-        let target = &arg.value_type;
         let mut params = Vec::with_capacity(est);
         while let Some(param) = args.peek() {
+            let param = param.into();
             if param.starts_with("-") {
                 break;
             }
-            let mut val = cast_type(target, param)?;
-            if let Some(validation) = arg.validation {
-                debug!("running validation for {:?}", val);
-                val = match validation(val) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        debug!("validation failed, reason: {}", e);
-                        return Err(Error::InvalidValue(param.clone(), e));
-                    }
-                };
+            let val = cast_type(&arg.value_type, param)?;
+            if let Err(e) = (arg.validation)(&val) {
+                debug!("validation failed, reason: {}", e);
+                return Err(Error::InvalidValue(param.to_string(), e));
             }
             params.push(val);
             args.next();
@@ -230,28 +299,21 @@ impl<'a, R> Args<'a, R> {
         Ok(params)
     }
 
-    fn get_values_bounded<T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
+    fn get_values_bounded<S, T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
     where
-        T: Iterator<Item = String>,
+        S: IntoStr,
+        T: Iterator<Item = S>,
     {
-        let target = &arg.value_type;
         let mut params = Vec::with_capacity(est);
-        let mut j = 0;
         while let Some(param) = args.peek() {
-            if param.starts_with("-") || j == est {
+            let param = param.into();
+            if param.starts_with("-") || params.len() == est {
                 break;
             }
-            j += 1;
-            let mut val = cast_type(target, param)?;
-            if let Some(validation) = arg.validation {
-                debug!("running validation for {:?}", val);
-                val = match validation(val) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        debug!("validation failed, reason: {}", e);
-                        return Err(Error::InvalidValue(param.clone(), e));
-                    }
-                };
+            let val = cast_type(&arg.value_type, param)?;
+            if let Err(e) = (arg.validation)(&val) {
+                debug!("validation failed, reason: {}", e);
+                return Err(Error::InvalidValue(param.to_string(), e));
             }
             params.push(val);
             args.next();
@@ -260,16 +322,17 @@ impl<'a, R> Args<'a, R> {
         Ok(params)
     }
 
-    fn update_values<T>(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
+    fn update_values<S, T>(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
     where
-        T: Iterator<Item = String>,
+        S: IntoStr,
+        T: Iterator<Item = S>,
     {
         debug!("getting values for {}", arg.name);
         let res = match arg.num_values {
             NumValues::Any => Ok(self.get_values_unbounded(arg, args, 0)?.into()),
             NumValues::AtLeast(i) => {
                 debug!("looking for at x > {} values", i);
-                let params = self.get_values_unbounded(arg, args, 0)?;
+                let params = self.get_values_unbounded(arg, args, i)?;
                 if params.len() >= i {
                     Ok(params.into())
                 } else {
@@ -312,19 +375,34 @@ impl<'a, R> Args<'a, R> {
     }
 
     fn try_insert_param(&self, key: &'a str, value: Value, out: &mut Builder<'a>) -> Result<(), Error> {
-        if self.disable_overrides && out.params.contains_key(key) {
-            return Err(Error::Override(key));
+        if !self.disable_overrides {
+            out.params.insert(key, value);
+            return Ok(());
         }
-        out.params.insert(key, value);
-        Ok(())
+        match out.params.entry(key) {
+            Occupied(_) => Err(Error::Override(key)),
+            Vacant(e) => {
+                e.insert(value);
+                Ok(())
+            }
+        }
     }
 
     fn try_insert_flag(&self, key: &'a str, out: &mut Builder<'a>) -> Result<(), Error> {
-        if self.disable_overrides && out.flags.contains_key(key) {
-            return Err(Error::Override(key));
+        match out.flags.entry(key) {
+            Occupied(mut e) => {
+                if self.disable_overrides {
+                    Err(Error::Override(key))
+                } else {
+                    e.insert(e.get() + 1);
+                    Ok(())
+                }
+            }
+            Vacant(e) => {
+                e.insert(1);
+                Ok(())
+            }
         }
-        out.flags.insert(key, out.flags.get(key).unwrap_or(&0) + 1);
-        Ok(())
     }
 
     fn handle_arg_missing(&self, arg: &str, out: &mut Builder<'a>) -> Result<(), Error> {
@@ -334,24 +412,25 @@ impl<'a, R> Args<'a, R> {
         }
     }
 
-    fn handle_arg_inner<T>(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
+    fn handle_arg_inner<S, T>(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
     where
-        T: Iterator<Item = String>,
+        S: IntoStr,
+        T: Iterator<Item = S>,
     {
         debug!("found arg {} matching {}", target.name, arg);
         self.update_values(target, args, out)
     }
 
-    fn handle_arg<T>(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
+    fn handle_arg<S, T>(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
     where
-        T: Iterator<Item = String>,
+        S: IntoStr,
+        T: Iterator<Item = S>,
     {
         if arg.starts_with("--") {
-            let arg = arg.trim_start_matches("--");
+            let arg = &arg[2..];
             debug!("handling long {}", arg);
-
             for a in &self.args {
-                for i in a.long {
+                if let Some(i) = a.long {
                     if i == arg {
                         return self.handle_arg_inner(&a, arg, args, out);
                     }
@@ -359,75 +438,75 @@ impl<'a, R> Args<'a, R> {
             }
             self.handle_arg_missing(arg, out)
         } else {
-            let arg = arg.trim_start_matches("-");
+            let arg = &arg[1..];
             debug!("handling short(s) {}", arg);
-            let matches = arg
+            let mut matches = arg
                 .graphemes(true)
-                .filter_map(|g| self.args.iter().filter(|a| a.short.is_some()).find(|a| a.short.unwrap() == g))
-                .collect::<Vec<&Arg>>();
-            match matches.len() {
-                0 => {
-                    debug!("no arg found for {}, looking for default", arg);
-                    self.handle_arg_missing(arg, out)
-                }
-                1 => {
+                .filter_map(|g| self.args.iter().filter(|a| a.short.is_some()).find(|a| a.short.unwrap() == g));
+            match (matches.next(), matches.next()) {
+                (Some(first), None) => {
                     debug!("single short found {}, trying to expand", arg);
-                    self.handle_arg_inner(matches[0], arg, args, out)
+                    self.handle_arg_inner(first, arg, args, out)
                 }
-                _ => {
+                (Some(first), Some(second)) => {
                     debug!("flag combination found {}", arg);
+                    self.try_insert_flag(first.name, out)?;
+                    self.try_insert_flag(second.name, out)?;
                     for res in matches {
                         self.try_insert_flag(res.name, out)?;
                     }
                     Ok(())
                 }
+                (None, _) => {
+                    debug!("no arg found for {}, looking for default", arg);
+                    self.handle_arg_missing(arg, out)
+                }
             }
         }
     }
 
-    fn apply<T: Iterator<Item = String>>(&'a self, args: T) -> Result<R, Error> {
+    fn apply<S: IntoStr, T: Iterator<Item = S>>(&'a self, args: T) -> Result<R, Error> {
         debug!("parsing args using command {}", self.name);
         // @todo: I wonder if we can avoid hashing with compile time magic?
         let mut builder = Builder {
-            params: HashMap::with_capacity(self.args.len()),
-            flags: HashMap::with_capacity(self.args.len()),
+            params: HashMap::new(),
+            flags: HashMap::new(),
         };
         let mut unknown_params = Vec::with_capacity(0);
         let mut positional = Vec::with_capacity(0);
         let mut args = args.peekable();
         while let Some(arg) = args.next() {
+            let arg = (&arg).into();
             // an argument :O time to start searching!
             if arg.starts_with("-") {
                 if arg == "--" {
                     debug!("found --, treating everything after as positional");
-                    // doing this inline instead of using a boolean because no point in doing all those "if"s
-                    for arg in &mut args {
-                        debug!("found positional arg {}", arg);
-                        positional.push(arg);
+                    (&mut args).for_each(|a| positional.push((&a).into().to_string()));
+                } else {
+                    debug!("found arg {}", arg);
+                    match self.handle_arg(&arg, &mut args, &mut builder) {
+                        Err(Error::UnknownArg(arg)) => unknown_params.push(arg),
+                        Err(e) => return Err(e),
+                        _ => {}
                     }
-                }
-                debug!("found arg {}", arg);
-                match self.handle_arg(&arg, &mut args, &mut builder) {
-                    Err(Error::UnknownArg(arg)) => unknown_params.push(arg),
-                    Err(e) => return Err(e),
-                    _ => {}
                 }
             } else {
                 debug!("found positional arg {}", arg);
-                positional.push(arg);
+                positional.push(arg.to_string());
             }
         }
         debug!("finished looping through args, running postprocessing");
+        // @todo: is there a way we can make this opt-in?
         let mut missing = Vec::with_capacity(0);
-        for param in &self.args {
-            if param.num_values != NumValues::None {
-                if !builder.params.contains_key(param.name) {
-                    if let Some(default) = param.default {
-                        debug!("using default value for {}", param.name);
-                        let val = default();
-                        builder.params.insert(param.name, check_type(&param.value_type, &val).map(|_| val)?);
-                    } else if param.required {
-                        missing.push(param.name);
+        for param in self.args.iter().filter(|p| p.num_values != NumValues::None) {
+            if param.required && !builder.params.contains_key(param.name) {
+                missing.push(param.name);
+            } else if let Some(default) = &param.default {
+                if let Vacant(v) = builder.params.entry(param.name) {
+                    debug!("using default value for {}", param.name);
+                    let val = v.insert(default());
+                    if !check_type(&param.value_type, val) {
+                        return Err(Error::WrongValueType(val.clone()));
                     }
                 }
             }
@@ -436,6 +515,18 @@ impl<'a, R> Args<'a, R> {
             debug!("missing required args {:?}", missing);
             return Err(Error::MissingRequiredArgs(missing));
         }
+
+        if !self.filters.filters.is_empty() {
+            let is_ok = match self.filters.filter_type {
+                FilterType::All => self.filters.filters.iter().all(|f| f.test(&builder) == 1),
+                FilterType::Any => self.filters.filters.iter().any(|f| f.test(&builder) == 1),
+            };
+            if !is_ok {
+                debug!("filtering failed");
+                return Err(Error::BadInput);
+            }
+        }
+
         Ok((self.handler)(Results {
             path: self.path.unwrap_or(self.name),
             flags: builder.flags,
@@ -503,7 +594,7 @@ mod tests {
             params: HashMap::new(),
             unknown_params: vec!["u".to_string()],
             positional: vec!["lol".to_string()],
-        }), args.parse_str(vec!["prog", "sub", "--arg", "lol", "-u"]));
+        }), args.parse(vec!["prog", "sub", "--arg", "lol", "-u"]));
     });
 
     test!(test_flag() {
@@ -517,7 +608,7 @@ mod tests {
             handler: |r| if r.flags.contains_key("arg") { 1 } else { 0 },
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg"]));
     });
 
     test!(test_arg_with_fixed_num_values_fails_on_none() {
@@ -533,7 +624,7 @@ mod tests {
         };
         assert_eq!(
             Err(Error::WrongNumValues("arg", &NumValues::Fixed(1), Value::from(vec![]))),
-            args.parse_str(vec!["prog", "--arg"])
+            args.parse(vec!["prog", "--arg"])
         );
     });
 
@@ -548,7 +639,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "lol"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_arg_with_any_values_none() {
@@ -562,7 +653,7 @@ mod tests {
             handler: |r| assert_has!(&vec![], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg"]));
     });
 
     test!(test_arg_with_any_values_single() {
@@ -576,7 +667,7 @@ mod tests {
             handler: |r| assert_has!(vec!["lol"], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "lol"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_arg_with_any_values_multiple() {
@@ -590,7 +681,7 @@ mod tests {
             handler: |r| assert_has!(vec!["lol", "lol2"], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "lol", "lol2"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol", "lol2"]));
     });
 
     test!(test_arg_with_fixed_num_values_too_many_values() {
@@ -604,7 +695,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg") == 1 && r.positional.first().filter(|i| i.as_str() == "no").is_some(),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "--arg", "lol", "no"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "--arg", "lol", "no"]));
     });
 
     test!(test_arg_with_fixed_num_values_and_other_args() {
@@ -618,7 +709,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "lol", "--arg2"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol", "--arg2"]));
     });
 
     test!(test_arg_with_fixed_num_values_and_other_args_double_dash() {
@@ -632,7 +723,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "lol", "--arg2"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol", "--arg2"]));
     });
 
     test!(test_multiple_args() {
@@ -657,7 +748,7 @@ mod tests {
             },
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "1", "2", "--arg2"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "1", "2", "--arg2"]));
     });
 
     test!(test_missing_arg() {
@@ -671,7 +762,7 @@ mod tests {
             handler: |r| if r.params.contains_key("arg") { 1 } else { 0 },
             ..Default::default()
         };
-        assert_eq!(Ok(0), args.parse_str(vec!["prog"]));
+        assert_eq!(Ok(0), args.parse(vec!["prog"]));
     });
 
     test!(test_sub_command_not_called() {
@@ -683,7 +774,7 @@ mod tests {
             handler: |_| 1,
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog"]));
     });
 
     test!(test_sub_commands() {
@@ -699,7 +790,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "sub", "sub"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "sub", "sub"]));
     });
 
     test!(test_default_arg() {
@@ -713,7 +804,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog"]));
     });
 
     test!(test_required_arg_missing() {
@@ -727,7 +818,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(Err(Error::MissingRequiredArgs(vec!["arg"])), args.parse_str(vec!["prog"]));
+        assert_eq!(Err(Error::MissingRequiredArgs(vec!["arg"])), args.parse(vec!["prog"]));
     });
 
     test!(test_required_arg() {
@@ -742,7 +833,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "lol"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_wrong_type() {
@@ -757,7 +848,7 @@ mod tests {
             handler: |r| assert_has!("lol", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Err(Error::WrongCastType("lol".to_owned())), args.parse_str(vec!["prog", "--arg", "lol"]));
+        assert_eq!(Err(Error::WrongCastType("lol".to_owned())), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_right_type_bool() {
@@ -772,7 +863,7 @@ mod tests {
             handler: |r| assert_has!(&true, r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "true"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "true"]));
     });
 
     test!(test_right_type_int() {
@@ -787,7 +878,7 @@ mod tests {
             handler: |r| assert_has!(&3, r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "3"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "3"]));
     });
 
     test!(test_right_type_long() {
@@ -802,7 +893,7 @@ mod tests {
             handler: |r| assert_has!(&i64::max_value(), r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", i64::max_value().to_string().as_str()]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", i64::max_value().to_string().as_str()]));
     });
 
     test!(test_right_type_float() {
@@ -817,7 +908,7 @@ mod tests {
             handler: |r| assert_has!(&f32::MAX, r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", f32::MAX.to_string().as_str()]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", f32::MAX.to_string().as_str()]));
     });
 
     test!(test_right_type_double() {
@@ -832,7 +923,7 @@ mod tests {
             handler: |r| assert_has!(&f64::MAX, r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", f64::MAX.to_string().as_str()]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", f64::MAX.to_string().as_str()]));
     });
 
     test!(test_right_type_string() {
@@ -847,7 +938,7 @@ mod tests {
             handler: |r| assert_has!("woop", r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "woop"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "woop"]));
     });
 
     test!(test_right_type_array() {
@@ -861,7 +952,7 @@ mod tests {
             handler: |r| assert_has!(vec![&23, &32], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "23", "32"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "23", "32"]));
     });
 
     test!(test_right_type_array_single() {
@@ -875,7 +966,7 @@ mod tests {
             handler: |r| assert_has!(vec![&23], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(1), args.parse_str(vec!["prog", "--arg", "23"]));
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "23"]));
     });
 
     test!(test_wrong_type_array() {
@@ -889,7 +980,7 @@ mod tests {
             handler: |r| assert_has!(vec![&23], r, "arg"),
             ..Default::default()
         };
-        assert_eq!(Err(Error::WrongCastType("true".to_owned())), args.parse_str(vec!["prog", "--arg", "true"]));
+        assert_eq!(Err(Error::WrongCastType("true".to_owned())), args.parse(vec!["prog", "--arg", "true"]));
     });
 
     test!(test_default_returns_wrong_type() {
@@ -903,7 +994,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        assert_eq!(Err(Error::WrongValueType("lol".into())), args.parse_str(vec!["prog"]));
+        assert_eq!(Err(Error::WrongValueType("lol".into())), args.parse(vec!["prog"]));
     });
 
     test!(test_property() {
@@ -911,7 +1002,7 @@ mod tests {
             handler: |r| r.positional.first().filter(|i| i.as_str() == "prop").is_some(),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "prop"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "prop"]));
     });
 
     test!(test_property_after_arg() {
@@ -925,7 +1016,7 @@ mod tests {
             handler: |r| r.positional.first().filter(|i| i.as_str() == "prop").is_some(),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "--arg", "prop"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "--arg", "prop"]));
     });
 
     test!(test_long_arg_ignores_single_dash() {
@@ -939,7 +1030,7 @@ mod tests {
             handler: |r| !r.params.contains_key("arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-arg"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-arg"]));
     });
 
     test!(test_short_arg_ignores_mario_kart_double_dash() {
@@ -953,7 +1044,7 @@ mod tests {
             handler: |r| !r.flags.contains_key("arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "--a"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "--a"]));
     });
 
     test!(test_short_arg() {
@@ -967,7 +1058,7 @@ mod tests {
             handler: |r| r.flags.contains_key("arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-a"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-a"]));
     });
 
     test!(test_unicode_short_arg() {
@@ -981,7 +1072,7 @@ mod tests {
             handler: |r| r.flags.contains_key("arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-Ẩ"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-Ẩ"]));
     });
 
     test!(test_unicode_short_arg_no_match() {
@@ -995,7 +1086,7 @@ mod tests {
             handler: |r| r.flags.contains_key("arg"),
             ..Default::default()
         };
-        assert_eq!(Ok(false), args.parse_str(vec!["prog", "-Ẩ"]));
+        assert_eq!(Ok(false), args.parse(vec!["prog", "-Ẩ"]));
     });
 
     test!(test_combinations() {
@@ -1014,7 +1105,7 @@ mod tests {
             handler: |r| r.flags.contains_key("arg") && r.flags.contains_key("arg2"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-ẨA"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-ẨA"]));
     });
 
     test!(test_flag_repeats() {
@@ -1028,7 +1119,7 @@ mod tests {
             handler: |r| r.flags["arg"],
             ..Default::default()
         };
-        assert_eq!(Ok(2), args.parse_str(vec!["prog", "-AA"]));
+        assert_eq!(Ok(2), args.parse(vec!["prog", "-AA"]));
     });
 
     test!(test_positional_after_double_dash() {
@@ -1038,11 +1129,16 @@ mod tests {
                 short: Some("a"),
                 num_values: NumValues::None,
                 ..Default::default()
+            }, Arg {
+                name: "arg2",
+                short: Some("b"),
+                num_values: NumValues::None,
+                ..Default::default()
             }],
-            handler: |r| !r.flags.contains_key("arg") && r.positional.first().filter(|f| f.as_str() == "-a").is_some(),
+            handler: |r| r.flags.contains_key("arg2") && !r.flags.contains_key("arg") && r.positional.first().filter(|f| f.as_str() == "-a").is_some(),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "--", "-a"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-b", "--", "-a"]));
     });
 
     test!(test_sub_commands_after_arg_is_not_called() {
@@ -1055,7 +1151,7 @@ mod tests {
             handler: |_| 0,
             ..Default::default()
         };
-        assert_eq!(Ok(0), args.parse_str(vec!["prog", "-arg", "sub"]));
+        assert_eq!(Ok(0), args.parse(vec!["prog", "-arg", "sub"]));
     });
 
     test!(test_validation() {
@@ -1064,20 +1160,20 @@ mod tests {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Fixed(1),
-                validation: Some(|v| {
-                    let s: String = (&v).into();
+                validation: |v| {
+                    let s: String = v.into();
                     if "abc" == s.as_str() {
-                        Ok(v)
+                        Ok(())
                     } else {
                         Err("oh noes".to_string())
                     }
-                }),
+                },
                 ..Default::default()
             }],
             handler: |r| !r.params.contains_key("a"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-a", "abc"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
     });
 
     test!(test_validation_unbounded() {
@@ -1086,20 +1182,20 @@ mod tests {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Any,
-                validation: Some(|v| {
-                    let s: String = (&v).into();
+                validation: |v| {
+                    let s: String = v.into();
                     if "abc" == s.as_str() {
-                        Ok(v)
+                        Ok(())
                     } else {
                         Err("oh noes".to_string())
                     }
-                }),
+                },
                 ..Default::default()
             }],
             handler: |r| !r.params.contains_key("a"),
             ..Default::default()
         };
-        assert_eq!(Ok(true), args.parse_str(vec!["prog", "-a", "abc"]));
+        assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
     });
 
     test!(test_validation_fails() {
@@ -1108,21 +1204,21 @@ mod tests {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Fixed(1),
-                validation: Some(|v| {
-                    let s: String = (&v).into();
+                validation: |v| {
+                    let s: String = v.into();
                     if "abc" == s.as_str() {
-                        Ok(v)
+                        Ok(())
                     } else {
                         Err("oh noes".to_string())
                     }
-                }),
+                },
                 ..Default::default()
             }],
             handler: |r| !r.params.contains_key("a"),
             ..Default::default()
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
-            args.parse_str(vec!["prog", "-a", "abcdef"]));
+        args.parse(vec!["prog", "-a", "abcdef"]));
     });
 
     test!(test_validation_fails_unbounded() {
@@ -1131,21 +1227,21 @@ mod tests {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Any,
-                validation: Some(|v| {
-                    let s: String = (&v).into();
+                validation: |v| {
+                    let s: String = v.into();
                     if "abc" == s.as_str() {
-                        Ok(v)
+                        Ok(())
                     } else {
                         Err("oh noes".to_string())
                     }
-                }),
+                },
                 ..Default::default()
             }],
             handler: |r| !r.params.contains_key("a"),
             ..Default::default()
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
-            args.parse_str(vec!["prog", "-a", "abcdef"]));
+        args.parse(vec!["prog", "-a", "abcdef"]));
     });
 
     test!(test_fail_duplicate_arg() {
@@ -1160,6 +1256,6 @@ mod tests {
             disable_overrides: true,
             ..Default::default()
         };
-        assert_eq!(Err(Error::Override("arg")), args.parse_str(vec!["prog", "-a", "--arg"]));
+        assert_eq!(Err(Error::Override("arg")), args.parse(vec!["prog", "-a", "--arg"]));
     });
 }
