@@ -255,38 +255,17 @@ impl IntoStr for String {
     }
 }
 
-impl<'a, R> Args<'a, R> {
-    #[allow(dead_code)]
-    pub fn parse<S: IntoStr, T: IntoIterator<Item = S>>(&'a self, args: T) -> Result<R, Error<'a>> {
-        debug!("starting arg parsing");
-        let mut command = self;
-        let mut args = args.into_iter().skip(1).peekable();
-        while let Some(arg) = args.peek() {
-            let arg = arg.into();
-            debug!("checking if {} is a subcommand of {}", arg, command.name);
-            if let Some(arg) = command.subcommands.iter().find(|&i| i.name == arg) {
-                // now we need to actually take what was peeked
-                args.next();
-                command = arg;
-            } else if arg == "help" {
-                // @todo
-            } else {
-                return command.apply(args);
-            }
-        }
-        debug!("applying command {}", command.name);
-        return command.apply(args);
-    }
+trait ArgsMethods<'a, R, S: IntoStr, T: Iterator<Item = S>> {
+    fn get_values_unbounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>;
+    fn get_values_bounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>;
+    fn update_values(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
+    fn handle_arg_inner(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
+    fn handle_arg(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
+    fn apply(&'a self, args: T) -> Result<R, Error>;
+}
 
-    fn generate_help(&self) -> Value {
-        Value::None
-    }
-
-    fn get_values_unbounded<S, T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
-    where
-        S: IntoStr,
-        T: Iterator<Item = S>,
-    {
+impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args<'a, R> {
+    fn get_values_unbounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error> {
         let mut params = Vec::with_capacity(est);
         while let Some(param) = args.peek() {
             let param = param.into();
@@ -305,11 +284,7 @@ impl<'a, R> Args<'a, R> {
         Ok(params)
     }
 
-    fn get_values_bounded<S, T>(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>
-    where
-        S: IntoStr,
-        T: Iterator<Item = S>,
-    {
+    fn get_values_bounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error> {
         let mut params = Vec::with_capacity(est);
         while let Some(param) = args.peek() {
             let param = param.into();
@@ -328,11 +303,8 @@ impl<'a, R> Args<'a, R> {
         Ok(params)
     }
 
-    fn update_values<S, T>(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
-    where
-        S: IntoStr,
-        T: Iterator<Item = S>,
-    {
+
+    fn update_values(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
         debug!("getting values for {}", arg.name);
         let res = match arg.num_values {
             NumValues::Any => Ok(self.get_values_unbounded(arg, args, 0)?.into()),
@@ -380,58 +352,12 @@ impl<'a, R> Args<'a, R> {
         self.try_insert_param(arg.name, res?, out)
     }
 
-    fn try_insert_param(&self, key: &'a str, value: Value, out: &mut Builder<'a>) -> Result<(), Error> {
-        if !self.disable_overrides {
-            out.params.insert(key, value);
-            return Ok(());
-        }
-        match out.params.entry(key) {
-            Occupied(_) => Err(Error::Override(key)),
-            Vacant(e) => {
-                e.insert(value);
-                Ok(())
-            }
-        }
-    }
-
-    fn try_insert_flag(&self, key: &'a str, out: &mut Builder<'a>) -> Result<(), Error> {
-        match out.flags.entry(key) {
-            Occupied(mut e) => {
-                if self.disable_overrides {
-                    Err(Error::Override(key))
-                } else {
-                    e.insert(e.get() + 1);
-                    Ok(())
-                }
-            }
-            Vacant(e) => {
-                e.insert(1);
-                Ok(())
-            }
-        }
-    }
-
-    fn handle_arg_missing(&self, arg: &str, out: &mut Builder<'a>) -> Result<(), Error> {
-        match arg {
-            "--help" | "-h" => self.try_insert_param("help", self.generate_help(), out),
-            _ => Err(Error::UnknownArg(String::from(arg))),
-        }
-    }
-
-    fn handle_arg_inner<S, T>(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
-    where
-        S: IntoStr,
-        T: Iterator<Item = S>,
-    {
+    fn handle_arg_inner(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
         debug!("found arg {} matching {}", target.name, arg);
         self.update_values(target, args, out)
     }
 
-    fn handle_arg<S, T>(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>
-    where
-        S: IntoStr,
-        T: Iterator<Item = S>,
-    {
+    fn handle_arg(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
         if arg.starts_with("--") {
             let arg = &arg[2..];
             debug!("handling long {}", arg);
@@ -471,7 +397,7 @@ impl<'a, R> Args<'a, R> {
         }
     }
 
-    fn apply<S: IntoStr, T: Iterator<Item = S>>(&'a self, args: T) -> Result<R, Error> {
+    fn apply(&'a self, args: T) -> Result<R, Error> {
         debug!("parsing args using command {}", self.name);
         // @todo: I wonder if we can avoid hashing with compile time magic?
         let mut builder = Builder {
@@ -541,6 +467,72 @@ impl<'a, R> Args<'a, R> {
             unknown_params,
             positional,
         }))
+    }
+}
+
+impl<'a, R> Args<'a, R> {
+    #[allow(dead_code)]
+    pub fn parse<S: IntoStr, T: IntoIterator<Item = S>>(&'a self, args: T) -> Result<R, Error<'a>> {
+        debug!("starting arg parsing");
+        let mut command = self;
+        let mut args = args.into_iter().skip(1).peekable();
+        while let Some(arg) = args.peek() {
+            let arg = arg.into();
+            debug!("checking if {} is a subcommand of {}", arg, command.name);
+            if let Some(arg) = command.subcommands.iter().find(|&i| i.name == arg) {
+                // now we need to actually take what was peeked
+                args.next();
+                command = arg;
+            } else if arg == "help" {
+                // @todo
+            } else {
+                return command.apply(args);
+            }
+        }
+        debug!("applying command {}", command.name);
+        return command.apply(args);
+    }
+
+    fn generate_help(&self) -> Value {
+        Value::None
+    }
+
+    fn try_insert_param(&self, key: &'a str, value: Value, out: &mut Builder<'a>) -> Result<(), Error> {
+        if !self.disable_overrides {
+            out.params.insert(key, value);
+            return Ok(());
+        }
+        match out.params.entry(key) {
+            Occupied(_) => Err(Error::Override(key)),
+            Vacant(e) => {
+                e.insert(value);
+                Ok(())
+            }
+        }
+    }
+
+    fn try_insert_flag(&self, key: &'a str, out: &mut Builder<'a>) -> Result<(), Error> {
+        match out.flags.entry(key) {
+            Occupied(mut e) => {
+                if self.disable_overrides {
+                    Err(Error::Override(key))
+                } else {
+                    e.insert(e.get() + 1);
+                    Ok(())
+                }
+            }
+            Vacant(e) => {
+                e.insert(1);
+                Ok(())
+            }
+        }
+    }
+
+    fn handle_arg_missing(&self, arg: &str, out: &mut Builder<'a>) -> Result<(), Error> {
+        match arg {
+            "--help" | "-h" => self.try_insert_param("help", self.generate_help(), out),
+            _ => Err(Error::UnknownArg(String::from(arg))),
+        }
     }
 }
 
