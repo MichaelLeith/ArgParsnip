@@ -27,7 +27,6 @@ pub enum Error<'a> {
     UnknownArg(String),
     InvalidArg,
     MissingRequiredArgs(Vec<&'a str>),
-    // @todo: lets avoid exposing Value here
     WrongNumValues(&'a str, &'a NumValues, Value),
     WrongValueType(Value),
     WrongCastType(String),
@@ -81,7 +80,6 @@ pub struct Arg<'a> {
     #[cfg_attr(feature = "derive", serde(default))]
     pub value_type: Type,
     #[cfg_attr(feature = "derive", serde(skip, default = "default_validation"))]
-    // @todo: can we provide a default and avoid the Option?
     pub validation: fn(&Value) -> Result<(), String>,
 }
 
@@ -126,6 +124,8 @@ pub struct Filters<'a> {
     pub filter_type: FilterType,
     #[cfg_attr(feature = "derive", serde(default, borrow))]
     pub filters: Vec<Filter<'a>>,
+    #[cfg_attr(feature = "derive", serde(default))]
+    pub inverse: bool,
 }
 
 #[derive(Default, Debug)]
@@ -136,12 +136,18 @@ pub struct Filter<'a> {
     #[cfg_attr(feature = "derive", serde(default))]
     pub filter_type: FilterType,
     #[cfg_attr(feature = "derive", serde(default, borrow))]
-    pub props: Vec<&'a str>,
+    pub args: Vec<&'a str>,
 }
 
 impl<'a> Filter<'a> {
     fn test(&self, builder: &Builder<'a>) -> usize {
-        1
+        debug!("applying filter {:?} to {:?}", self, builder);
+        let res = match self.filter_type {
+            FilterType::All => self.args.iter().all(|p| builder.params.contains_key(p) || builder.flags.contains_key(p)),
+            FilterType::Any => self.args.iter().any(|p| builder.params.contains_key(p) || builder.flags.contains_key(p)),
+        };
+        debug!("filter result: {}, using inverse: {}", res, self.inverse);
+        (res ^ self.inverse) as usize
     }
 }
 
@@ -187,7 +193,7 @@ pub trait Handler<'a, T> {
     fn handler() -> fn(Results<'a>) -> T;
 }
 
-// @todo: I don't like havingthis but we can't have negative constraints :/
+// @todo: I don't like having this but we can't have negative constraints :/
 impl<'a, T: Default> Handler<'a, T> for T {
     fn handler() -> fn(Results<'a>) -> Self {
         |_| Default::default()
@@ -227,7 +233,7 @@ pub struct Results<'a> {
     pub positional: Vec<String>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct Builder<'a> {
     flags: HashMap<&'a str, i32>,
     params: HashMap<&'a str, Value>,
@@ -521,7 +527,8 @@ impl<'a, R> Args<'a, R> {
                 FilterType::All => self.filters.filters.iter().all(|f| f.test(&builder) == 1),
                 FilterType::Any => self.filters.filters.iter().any(|f| f.test(&builder) == 1),
             };
-            if !is_ok {
+            debug!("filter result: {}, using inverse: {}", is_ok, self.filters.inverse);
+            if is_ok == self.filters.inverse {
                 debug!("filtering failed");
                 return Err(Error::BadInput);
             }
@@ -541,7 +548,7 @@ impl<'a, R> Args<'a, R> {
 mod tests {
     use std::{collections::HashMap, convert::TryInto, sync::Once};
 
-    use crate::{value::Type, Arg, Args, Error, NumValues, Results, Value};
+    use crate::{value::Type, Arg, Args, Error, Filter, FilterType, Filters, NumValues, Results, Value};
     use pretty_assertions::assert_eq;
     use simple_logger::SimpleLogger;
 
@@ -1257,5 +1264,292 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(Err(Error::Override("arg")), args.parse(vec!["prog", "-a", "--arg"]));
+    });
+
+    test!(test_simple_and_filter() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg2"],
+                }],
+                ..Default::default()
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a", "--arg"]));
+    });
+
+    test!(test_simple_and_filter_fails() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg2"],
+                }],
+                ..Default::default()
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a"]));
+    });
+
+    test!(test_simple_or_filter() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: true,
+                    args: vec!["arg", "arg2"],
+                }],
+                ..Default::default()
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a"]));
+    });
+
+    test!(test_simple_or_filter_fails() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: true,
+                    args: vec!["arg", "arg2"],
+                }],
+                ..Default::default()
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a", "--arg"]));
+    });
+
+    test!(test_multiple_filters_any() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg3",
+                long: Some("arg3"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg2"],
+                }, Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg3"],
+                }],
+                ..Default::default()
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg", "--arg3"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a", "--arg"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a", "--arg3"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg", "-a"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg3", "-a"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg3", "-a", "--arg"]));
+    });
+
+    test!(test_multiple_filters_all() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg3",
+                long: Some("arg3"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg2"],
+                }, Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg3"],
+                }],
+                filter_type: FilterType::All,
+                ..Default::default()
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg", "--arg3"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a", "--arg"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a", "--arg3"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg", "-a"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3", "-a"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg3", "-a", "--arg"]));
+    });
+
+    test!(test_multiple_filters_all_not() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg3",
+                long: Some("arg3"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg2"],
+                }, Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg3"],
+                }],
+                filter_type: FilterType::All,
+                inverse: true
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg3"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg", "--arg3"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a", "--arg"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a", "--arg3"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg", "-a"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg3", "-a"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3", "-a", "--arg"]));
+    });
+
+    test!(test_multiple_filters_any_not() {
+        let args: Args<()> = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg2",
+                long: Some("arg"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }, Arg {
+                name: "arg3",
+                long: Some("arg3"),
+                num_values: NumValues::None,
+                ..Default::default()
+            }],
+            filters: Filters {
+                filters: vec![Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg2"],
+                }, Filter {
+                    filter_type: FilterType::All,
+                    inverse: false,
+                    args: vec!["arg", "arg3"],
+                }],
+                filter_type: FilterType::Any,
+                inverse: true
+            },
+            disable_overrides: true,
+            ..Default::default()
+        };
+        assert_eq!(Ok(()), args.parse(vec!["prog", "-a"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg3"]));
+        assert_eq!(Ok(()), args.parse(vec!["prog", "--arg", "--arg3"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a", "--arg"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a", "--arg3"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg", "-a"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3", "-a"]));
+        assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3", "-a", "--arg"]));
     });
 }
