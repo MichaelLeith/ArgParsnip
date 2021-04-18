@@ -55,6 +55,9 @@ argparsnip = "0.1.2"
 
 Here are some quick common cases. For more examples please look at the tests in `lib.rs`
 
+## Documentation
+https://docs.rs/argparsnip/0.1.2/argparsnip/
+
 ## Examples
 
 **Check if a flag was given once**
@@ -200,8 +203,6 @@ fn main() {
     let results = args.parse(std::env::args());
 }
 ```
-
-## Documentation
 
 # Development
 
