@@ -210,7 +210,6 @@ fn main() {
 * Benchmarks
 * More tests
 * Features
-  * Support positional arguments
   * Bash/Zsh completion
   * Support disabling positional args
   * Support updating repeats, e.g --arg Foo --arg Bar should give {"arg": ["Foo", "Bar"]} 
