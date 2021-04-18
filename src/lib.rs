@@ -454,7 +454,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             }
         }
         if !missing.is_empty() {
-            debug!("missing required args {:?}", missing);
+            debug!("missing required args! {:?}", missing);
             return Err(Error::MissingRequiredArgs(missing));
         }
 
@@ -626,6 +626,28 @@ impl<'a, R> Args<'a, R> {
     }
 }
 
+#[cfg(feature = "macros")]
+#[macro_export]
+macro_rules! args {
+    ($($key:ident : $value:expr),* $(,)?) => {
+        Args {
+            $($key: $value),+,
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(feature = "macros")]
+#[macro_export]
+macro_rules! arg {
+    ($($key:ident : $value:expr),* $(,)?) => {
+        Arg {
+            $($key: $value),+,
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, convert::TryInto, sync::Once};
@@ -660,19 +682,16 @@ mod tests {
     }
 
     test!(test_returning_results() {
-        let args = Args {
-            subcommands: vec![Args {
+        let args = args! {
+            subcommands: vec![args! {
                 name: "sub",
                 path: Some("main/sub"),
-                args: vec![Arg {
+                args: vec![arg! {
                     name: "arg",
                     long: Some("arg"),
                     num_values: NumValues::None,
-                    ..Default::default()
                 }],
-                ..Default::default()
             }],
-            ..Default::default()
         };
         let mut flags = HashMap::with_capacity(1);
         flags.insert("arg", 1);
@@ -687,29 +706,25 @@ mod tests {
     });
 
     test!(test_flag() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| if r.flags.contains_key("arg") { 1 } else { 0 },
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg"]));
     });
 
     test!(test_arg_with_fixed_num_values_fails_on_none() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| if r.params.contains_key("arg") { 1 } else { 0 },
-            ..Default::default()
         };
         assert_eq!(
             Err(Error::WrongNumValues("arg", &NumValues::Fixed(1), Value::from(vec![]))),
@@ -718,535 +733,460 @@ mod tests {
     });
 
     test!(test_arg_with_fixed_num_values() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_arg_with_any_values_none() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Any,
-                ..Default::default()
             }],
             handler: |r| assert_has!(&vec![], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg"]));
     });
 
     test!(test_arg_with_any_values_single() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Any,
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec!["lol"], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_arg_with_any_values_multiple() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Any,
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec!["lol", "lol2"], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol", "lol2"]));
     });
 
     test!(test_arg_with_fixed_num_values_too_many_values() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg") == 1 && r.positional.first().filter(|i| i.as_str() == "no").is_some(),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "--arg", "lol", "no"]));
     });
 
     test!(test_arg_with_fixed_num_values_and_other_args() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol", "--arg2"]));
     });
 
     test!(test_arg_with_fixed_num_values_and_other_args_double_dash() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol", "--arg2"]));
     });
 
     test!(test_multiple_args() {
-        let args = Args {
+        let args = args! {
             args: vec![
-                Arg {
+                arg! {
                     name: "arg",
                     long: Some("arg"),
                     num_values: NumValues::Fixed(2),
-                    ..Default::default()
                 },
-                Arg {
+                arg! {
                     name: "arg2",
                     long: Some("arg2"),
                     num_values: NumValues::Any,
-                    ..Default::default()
                 },
             ],
             handler: |r| match assert_has!(vec!["1", "2"], r, "arg") {
                 1 => assert_has!(&vec![], r, "arg2"),
                 _ => 0,
             },
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "1", "2", "--arg2"]));
     });
 
     test!(test_missing_arg() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| if r.params.contains_key("arg") { 1 } else { 0 },
-            ..Default::default()
         };
         assert_eq!(Ok(0), args.parse(vec!["prog"]));
     });
 
     test!(test_sub_command_not_called() {
-        let args = Args {
-            subcommands: vec![Args {
+        let args = args! {
+            subcommands: vec![args! {
                 name: "sub",
-                ..Default::default()
             }],
             handler: |_| 1,
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog"]));
     });
 
     test!(test_sub_commands() {
-        let args = Args {
-            subcommands: vec![Args {
+        let args = args! {
+            subcommands: vec![args! {
                 name: "sub",
-                subcommands: vec![Args {
+                subcommands: vec![args! {
                     name: "sub",
                     handler: |_| 1,
-                    ..Default::default()
                 }],
-                ..Default::default()
             }],
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "sub", "sub"]));
     });
 
     test!(test_default_arg() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 default: Some(|| "lol".into()),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog"]));
     });
 
     test!(test_required_arg_missing() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 required: true,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
-            ..Default::default()
         };
         assert_eq!(Err(Error::MissingRequiredArgs(vec!["arg"])), args.parse(vec!["prog"]));
     });
 
     test!(test_required_arg() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 required: true,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_wrong_type() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Bool,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("lol", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Err(Error::WrongCastType("lol".to_owned())), args.parse(vec!["prog", "--arg", "lol"]));
     });
 
     test!(test_right_type_bool() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Bool,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!(&true, r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "true"]));
     });
 
     test!(test_right_type_int() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Int,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!(&3, r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "3"]));
     });
 
     test!(test_right_type_long() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Long,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!(&i64::max_value(), r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", i64::max_value().to_string().as_str()]));
     });
 
     test!(test_right_type_float() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Float,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!(&f32::MAX, r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", f32::MAX.to_string().as_str()]));
     });
 
     test!(test_right_type_double() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Double,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!(&f64::MAX, r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", f64::MAX.to_string().as_str()]));
     });
 
     test!(test_right_type_string() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::String,
                 num_values: NumValues::Fixed(1),
-                ..Default::default()
             }],
             handler: |r| assert_has!("woop", r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "woop"]));
     });
 
     test!(test_right_type_array() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Array(Box::from(Type::Int)),
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec![&23, &32], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "23", "32"]));
     });
 
     test!(test_right_type_array_single() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Array(Box::from(Type::Int)),
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec![&23], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "23"]));
     });
 
     test!(test_wrong_type_array() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Array(Box::from(Type::Int)),
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec![&23], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Err(Error::WrongCastType("true".to_owned())), args.parse(vec!["prog", "--arg", "true"]));
     });
 
     test!(test_default_returns_wrong_type() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Int,
                 default: Some(|| "lol".into()),
-                ..Default::default()
             }],
-            ..Default::default()
         };
         assert_eq!(Err(Error::WrongValueType("lol".into())), args.parse(vec!["prog"]));
     });
 
     test!(test_property() {
-        let args = Args {
+        let args = args! {
             handler: |r| r.positional.first().filter(|i| i.as_str() == "prop").is_some(),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "prop"]));
     });
 
     test!(test_property_after_arg() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.positional.first().filter(|i| i.as_str() == "prop").is_some(),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "--arg", "prop"]));
     });
 
     test!(test_long_arg_ignores_single_dash() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| !r.params.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-arg"]));
     });
 
     test!(test_short_arg_ignores_mario_kart_double_dash() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| !r.flags.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "--a"]));
     });
 
     test!(test_short_arg() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.flags.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a"]));
     });
 
     test!(test_unicode_short_arg() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("Ẩ"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.flags.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-Ẩ"]));
     });
 
     test!(test_unicode_short_arg_no_match() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("A"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.flags.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(false), args.parse(vec!["prog", "-Ẩ"]));
     });
 
     test!(test_combinations() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("Ẩ"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 short: Some("A"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.flags.contains_key("arg") && r.flags.contains_key("arg2"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-ẨA"]));
     });
 
     test!(test_flag_repeats() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 short: Some("A"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.flags["arg"],
-            ..Default::default()
         };
         assert_eq!(Ok(4), args.parse(vec!["prog", "-AA", "--arg", "-A"]));
     });
 
     test!(test_positional_after_double_dash() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 short: Some("b"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             handler: |r| r.flags.contains_key("arg2") && !r.flags.contains_key("arg") && r.positional.first().filter(|f| f.as_str() == "-a").is_some(),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-b", "--", "-a"]));
     });
 
     test!(test_sub_commands_after_arg_is_not_called() {
-        let args = Args {
-            subcommands: vec![Args {
+        let args = args! {
+            subcommands: vec![args! {
                 name: "sub",
                 handler: |_| 1,
-                ..Default::default()
             }],
             handler: |_| 0,
-            ..Default::default()
         };
         assert_eq!(Ok(0), args.parse(vec!["prog", "-arg", "sub"]));
     });
 
     test!(test_validation() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Fixed(1),
@@ -1258,17 +1198,15 @@ mod tests {
                         Err("oh noes".to_string())
                     }
                 },
-                ..Default::default()
             }],
             handler: |r| r.params.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
     });
 
     test!(test_validation_vec() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::AtLeast(1),
@@ -1281,17 +1219,15 @@ mod tests {
                         Err("oh noes".to_string())
                     }
                 },
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec![&1, &2], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(1), args.parse(vec!["prog", "-a", "1", "2"]));
     });
 
     test!(test_validation_unbounded() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Any,
@@ -1303,17 +1239,15 @@ mod tests {
                         Err("oh noes".to_string())
                     }
                 },
-                ..Default::default()
             }],
             handler: |r| r.params.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
     });
 
     test!(test_validation_fails() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Fixed(1),
@@ -1325,18 +1259,16 @@ mod tests {
                         Err("oh noes".to_string())
                     }
                 },
-                ..Default::default()
             }],
             handler: |r| !r.params.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
         args.parse(vec!["prog", "-a", "abcdef"]));
     });
 
     test!(test_validation_fails_unbounded() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::Any,
@@ -1348,42 +1280,36 @@ mod tests {
                         Err("oh noes".to_string())
                     }
                 },
-                ..Default::default()
             }],
             handler: |r| !r.params.contains_key("arg"),
-            ..Default::default()
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
         args.parse(vec!["prog", "-a", "abcdef"]));
     });
 
     test!(test_fail_duplicate_arg() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Err(Error::Override("arg")), args.parse(vec!["prog", "-a", "--arg"]));
     });
 
     test!(test_simple_and_filter() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1394,23 +1320,20 @@ mod tests {
                 ..Default::default()
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Ok(()), args.parse(vec!["prog", "-a", "--arg"]));
     });
 
     test!(test_simple_and_filter_fails() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1421,23 +1344,20 @@ mod tests {
                 ..Default::default()
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a"]));
     });
 
     test!(test_simple_or_filter() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1448,23 +1368,20 @@ mod tests {
                 ..Default::default()
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Ok(()), args.parse(vec!["prog", "-a"]));
     });
 
     test!(test_simple_or_filter_fails() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1475,28 +1392,24 @@ mod tests {
                 ..Default::default()
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a", "--arg"]));
     });
 
     test!(test_multiple_filters_any() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg3",
                 long: Some("arg3"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1511,7 +1424,6 @@ mod tests {
                 ..Default::default()
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a"]));
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg"]));
@@ -1525,22 +1437,19 @@ mod tests {
     });
 
     test!(test_multiple_filters_all() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg3",
                 long: Some("arg3"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1556,7 +1465,6 @@ mod tests {
                 ..Default::default()
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "-a"]));
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg"]));
@@ -1570,22 +1478,19 @@ mod tests {
     });
 
     test!(test_multiple_filters_all_not() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg3",
                 long: Some("arg3"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1601,7 +1506,6 @@ mod tests {
                 inverse: true
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Ok(()), args.parse(vec!["prog", "-a"]));
         assert_eq!(Ok(()), args.parse(vec!["prog", "--arg"]));
@@ -1615,22 +1519,19 @@ mod tests {
     });
 
     test!(test_multiple_filters_any_not() {
-        let args: Args<()> = Args {
-            args: vec![Arg {
+        let args: Args<()> = args! {
+            args: vec![arg! {
                 name: "arg",
                 short: Some("a"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg2",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
-            }, Arg {
+            }, arg! {
                 name: "arg3",
                 long: Some("arg3"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
             filters: Filters {
                 filters: vec![Filter {
@@ -1646,7 +1547,6 @@ mod tests {
                 inverse: true
             },
             disable_overrides: true,
-            ..Default::default()
         };
         assert_eq!(Ok(()), args.parse(vec!["prog", "-a"]));
         assert_eq!(Ok(()), args.parse(vec!["prog", "--arg"]));
@@ -1660,15 +1560,13 @@ mod tests {
     });
 
     test!(test_multiple_values_split_unsupported() {
-        let args = Args {
-            args: vec![Arg {
+        let args = args! {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::Fixed(2),
-                ..Default::default()
             }],
             handler: |r| assert_has!(vec!["1", "2"], r, "arg"),
-            ..Default::default()
         };
         assert_eq!(Err(Error::WrongNumValues("arg", &NumValues::Fixed(2), Value::Array(vec![Value::String("1".to_string())]))), 
             args.parse(vec!["prog", "--arg", "1", "--arg", "2"]));

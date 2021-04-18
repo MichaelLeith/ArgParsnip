@@ -7,7 +7,7 @@ Add the lib to your `Cargo.toml`.
 
 ```
 [dependencies]
-argparsnip = "0.1.2"
+argparsnip = "0.1.3"
 ```
 
 # Features
@@ -50,13 +50,14 @@ argparsnip = "0.1.2"
   - write your args schema in any format with a serde parser (serde_json, toml etc.), see derive-test for an example
 * **Other opt-in features**
   - *debug* - enables logging info about arg parsing
+  - *macros* - enabled by default, we provide some utility macros to avoid writing ..Default::default() everywhere
 
 # Usage
 
 Here are some quick common cases. For more examples please look at the tests in `lib.rs`
 
 ## Documentation
-https://docs.rs/argparsnip/0.1.2/argparsnip/
+https://docs.rs/argparsnip/0.1.3/argparsnip/
 
 ## Examples
 
@@ -65,13 +66,11 @@ https://docs.rs/argparsnip/0.1.2/argparsnip/
 ```
 // ./prog --arg
 fn main() {
-    let args = Args {
-        args: vec![Arg {
+    let args = args! {
+        args: vec![arg! {
             name: "arg",
             short: Some("a"),
-            ..Default::default()
         }],
-        ..Default::default() 
     };
     let results = args.parse(std::env::args());
     assert_eq!(1, results.flags("arg"));
@@ -83,16 +82,14 @@ fn main() {
 ```
 // ./prog --arg
 fn main() {
-    let args = Args {
-        args: vec![Arg {
+    let args = args! {
+        args: vec![arg! {
             name: "arg",
             short: Some("a"),
             about: "a flag",
             long: Some("arg"),
             required: true,
-            ..Default::default()
         }],
-        ..Default::default() 
     };
     let results = args.parse(std::env::args());
     assert_eq!(1, results.flags("arg"));
@@ -104,16 +101,14 @@ fn main() {
 ```
 // ./prog -a 1
 fn main() {
-    let args = Args {
-        args: vec![Arg {
+    let args = args! {
+        args: vec![arg! {
             name: "arg",
             short: Some("a"),
             default: Some(|| { Value::From(2) }),
             value_type: Type::Int,
             num_values: NumValues::Fixed(1),
-            ..Default::default()
         }],
-        ..Default::default()
     };
     let results = args.parse(std::env::args());
     assert_eq!(1, results.params.get("arg")?.try_into());
@@ -125,8 +120,8 @@ fn main() {
 ```
 // ./prog -a 1 2
 fn main() {
-    let args = Args {
-        args: vec![Arg {
+    let args = args! {
+        args: vec![arg! {
             name: "arg",
             short: Some("a"),
             value_type: Type::Int,
@@ -139,9 +134,7 @@ fn main() {
                     Err("failed validation")
                 }
             }
-            ..Default::default()
         }],
-        ..Default::default()
     };
     let results = args.parse(std::env::args());
     assert_eq!(vec![1, 2], results.params.get("arg")?.try_into());
@@ -153,25 +146,21 @@ fn main() {
 ```
 // ./prog sub --arg 
 fn main() {
-    let args = Args {
-        args: vec![Arg {
+    let args = args! {
+        args: vec![arg! {
             name: "arg",
             long: Some("arg"),
             num_values: NumValues::None,
-            ..Default::default()
         }],
-        subcommands: vec![Args {
+        subcommands: vec![args! {
             name: "sub",
             path: Some("main/sub"),
-            args: vec![Arg {
+            args: vec![arg! {
                 name: "arg",
                 long: Some("arg"),
                 num_values: NumValues::None,
-                ..Default::default()
             }],
-            ..Default::default()
         }],
-        ..Default::default()
     };
     let results = args.parse(std::env::args());
     // this is the unique identifier for the subcommand
@@ -185,22 +174,19 @@ fn main() {
 // only supports combinations (--arg && --arg2) or (--arg && --arg3)
 // will fail if --arg or --arg2 or --arg3 are passed on their own
 fn main() {
-    let args = Args {
-        args: vec![Arg {
+    let args = args! {
+        args: vec![arg! {
             name: "arg",
             long: Some("arg"),
             num_values: NumValues::None,
-            ..Default::default()
-        }, Arg {
+        }, arg! {
             name: "arg2",
             long: Some("arg2"),
             num_values: NumValues::None,
-            ..Default::default()
-        }, Arg {
+        }, arg! {
             name: "arg3",
             long: Some("arg3"),
             num_values: NumValues::None,
-            ..Default::default()
         }],
         filters: Filters {
             filters: vec![Filter {
@@ -216,7 +202,6 @@ fn main() {
         },
         // this flag means we will fail if we see the same value multiple times
         disable_overrides: true,
-        ..Default::default()
     };
     let results = args.parse(std::env::args());
 }
