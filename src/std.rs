@@ -1,4 +1,6 @@
 #![no_std]
+/// proxy file for when no_std support is enabled. Simply defines aliases for std modules so we don't need to
+/// deal with different names elsewhere
 
 pub mod boxed {
     pub use alloc::boxed::Box;

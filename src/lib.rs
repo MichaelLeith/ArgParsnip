@@ -26,6 +26,7 @@ use unicode_segmentation::UnicodeSegmentation;
 #[cfg(feature = "debug")]
 use log::debug;
 
+/// noop macro for when debug logging is disabled (and so log::debug isn't imported)
 #[cfg(not(feature = "debug"))]
 macro_rules! debug {
     ($($arg:tt)+) => {};
@@ -44,6 +45,10 @@ pub enum Error<'a> {
     BadInput,
 }
 
+/// The number of values users are able to assign an arg
+/// If None we will treat the arg as a flag. This is a special case because
+/// if flags are seen multiple times (e.g -vvv) we need to handle that as extra verbose by exposing the number of repetitions.
+/// This isn't needed for normal flags though - just now we overwrite them, but in the future we may move to appending there
 #[allow(dead_code)]
 #[derive(PartialEq, Clone, Copy, Debug)]
 #[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
@@ -61,33 +66,39 @@ impl Default for NumValues {
     }
 }
 
+/// Struct defining a single arg we can accept
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Arg<'a> {
-    // unique key (per Args) to identify this arg
+    /// unique key (per Args) to identify this arg
     pub name: &'a str,
-    // aliases we'll match this arg with e.g -t --test
+    /// short (single dash, e.g -v) alias to match this arg with
+    /// @note: if multiple args have the same "short" or "long" name then
+    /// we have a race condition. We do not check for this but which we use should be considered undefined behaviour
     #[cfg_attr(feature = "derive", serde(default))]
     pub short: Option<&'a str>,
+    /// long (double dash, e.g --verbose) alias to match this arg with
     #[cfg_attr(feature = "derive", serde(default))]
     pub long: Option<&'a str>,
-    // info about this arg
+    /// info about this arg, used when printing --help
     #[cfg_attr(feature = "derive", serde(default))]
     pub about: &'a str,
-    // number of parameters this arg accepts
+    /// number of parameters this arg accepts. See NumValues for more details
     #[cfg_attr(feature = "derive", serde(default))]
     pub num_values: NumValues,
-    // name for the value of this arg in --help
+    /// name for the value of this arg in --help, used when printing --help
     #[cfg_attr(feature = "derive", serde(default))]
     pub value_name: Option<&'a str>,
-    // default value for this arg
+    /// default value for this arg if it is missing. By default no default is given
     #[cfg_attr(feature = "derive", serde(skip, default))]
     pub default: Option<fn() -> Value>,
-    // whether this arg is required
+    /// whether this arg is required
     #[cfg_attr(feature = "derive", serde(default))]
     pub required: bool,
-    // type for values
+    /// type for values, if given argparsing will fail if given the wrong type + Error::WrongValueType
     #[cfg_attr(feature = "derive", serde(default))]
     pub value_type: Type,
+    /// additional validation for this arg. By default is a noop
+    /// If this returns Err(String) argparsing will fail with the given string + Error::InvalidValue
     #[cfg_attr(feature = "derive", serde(skip, default = "default_validation"))]
     pub validation: fn(&Value) -> Result<(), String>,
 }
@@ -112,6 +123,10 @@ impl<'a> std::default::Default for Arg<'a> {
         }
     }
 }
+
+/// How to match filters:
+///     All -> the filter passes if all are true
+///     Any -> the filter passes if any are true
 #[cfg_attr(feature = "debug", derive(Debug))]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub enum FilterType {
@@ -119,6 +134,8 @@ pub enum FilterType {
     Any,
 }
 
+/// Collection of filters used to constrain the combinations of arguments that can be matched.
+/// For example, to say we cannot get both args A && B, or we can only be passed C if we've also been passed D.
 #[derive(Default)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Filters<'a> {
@@ -130,6 +147,11 @@ pub struct Filters<'a> {
     pub inverse: bool,
 }
 
+/// A specific combination of args that must be matched in Filters.
+/// E.g Filter { args: vec!["foo", "bar"], filter_type: Any} will pass on foo | bar
+/// E.g Filter { args: vec!["foo", "bar"], filter_type: All} will only pass on foo & bar
+/// E.g Filter { args: vec!["foo", "bar"], filter_type: Any, inverse: true} will pass on foo ^ bar
+/// E.g Filter { args: vec!["foo", "bar"], filter_type: All, inverse: true} will only pass on !(foo & bar)
 #[cfg_attr(feature = "debug", derive(Debug))]
 #[derive(Default)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
@@ -138,11 +160,13 @@ pub struct Filter<'a> {
     pub inverse: bool,
     #[cfg_attr(feature = "derive", serde(default))]
     pub filter_type: FilterType,
+    /// A list of Arg names to filter on.
     #[cfg_attr(feature = "derive", serde(default, borrow))]
     pub args: Vec<&'a str>,
 }
 
 impl<'a> Filter<'a> {
+    /// method to check if our filter condition holds. returns 1 on true, 0 on false
     fn test(&self, builder: &Builder<'a>) -> usize {
         debug!("applying filter {:?} to {:?}", self, builder);
         let res = match self.filter_type {
@@ -160,26 +184,46 @@ impl Default for FilterType {
     }
 }
 
+/// Struct defining the collection of args we support
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Args<'a, T = Results<'a>> {
+    /// name of this command (if it's the root) or subcommand
+    /// if ommitted this will default to the cargo package name (even with subcommands)
     #[cfg_attr(feature = "derive", serde(default = "name_default"))]
     pub name: &'a str,
+    /// If this subcommand is matched this field will be returned alongside the Results,
+    /// with the intention that it can be used to uniquely identify which Args struct was matched
+    /// (although uniqueness is not enforced). This is needed because the name field can be repeated in nested subcommands, e.g
+    /// ./foo help
+    /// ./foo subcommand help
+    /// where "help" is the name
+    /// This field is also used in the --version && --help command, so we recommend that this mirrors the cli call used, e.g
+    /// if name = "subcommand" then
+    /// path = "root subcommand"
     #[cfg_attr(feature = "derive", serde(default))]
     pub path: Option<&'a str>,
+    /// The program version, used by the --version command
+    /// if ommitted this will default to the cargo package version (even with subcommands)
     #[cfg_attr(feature = "derive", serde(default = "version_default"))]
     pub version: &'a str,
+    /// About string included in the --help command
+    /// if ommitted this will default to the cargo package description (even with subcommands)
     #[cfg_attr(feature = "derive", serde(default = "about_default"))]
     pub about: &'a str,
+    /// Collections of args that we will look for under this command. Any matched will be included in the Results params or flags.
     #[cfg_attr(feature = "derive", serde(default))]
     pub args: Vec<Arg<'a>>,
+    /// Whether to fail if an arg is seen multiple times. Defaults to false
     #[cfg_attr(feature = "derive", serde(default))]
     pub disable_overrides: bool,
+    /// List of subcommands underneath this command
     #[cfg_attr(feature = "derive", serde(default = "default_vec"))]
     pub subcommands: Vec<Args<'a, T>>,
-    // handler to invoke when this command has been found.
-    // This is not called if a subcommand is invoked
+    /// handler to invoke when this command has been found.
+    /// This is not called if a subcommand is invoked
     #[cfg_attr(feature = "derive", serde(skip, bound(deserialize = "T: Handler<'a, T>"), default = "T::handler"))]
     pub handler: fn(Results<'a>) -> T,
+    /// Filter conditions to restrict the combinations of args this command supports
     #[cfg_attr(feature = "derive", serde(default))]
     pub filters: Filters<'a>,
 }
@@ -189,11 +233,11 @@ fn name_default<'a>() -> &'a str {
 }
 
 fn version_default<'a>() -> &'a str {
-    env!("CARGO_PKG_VERSION") 
+    env!("CARGO_PKG_VERSION")
 }
 
 fn about_default<'a>() -> &'a str {
-    env!("CARGO_PKG_DESCRIPTION") 
+    env!("CARGO_PKG_DESCRIPTION")
 }
 
 #[cfg(feature = "derive")]
@@ -234,16 +278,29 @@ impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
     }
 }
 
+/// Results object returned by arg parsing (or passed to the handler)
 #[derive(Debug, PartialEq)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Results<'a> {
+    /// the Args struct we matched's path, used to uniquely identify the command/subcommand
     pub path: &'a str,
+    /// mapping of flags to the number of times they were seen
     pub flags: HashMap<&'a str, i32>,
+    /// mapping of args to the values seen for them
+    /// if it is specified that the arg should only match one time this will be a single Value,
+    /// otherwise it will be a Value::Array
     pub params: HashMap<&'a str, Value>,
+    /// list of params seen that were not recognised
+    /// @todo: support failing if this isn't empty
     pub unknown_params: Vec<String>,
+    /// list of positional arguments seen
+    /// note that while in the current implementation these can be interspersed between args,
+    /// e.g --flag positional --flag2 is considered valid
+    /// we do not guarantee that this will be true in future versions
     pub positional: Vec<String>,
 }
 
+/// Internal type to pass around matched args
 #[derive(Default, Debug)]
 struct Builder<'a> {
     flags: HashMap<&'a str, i32>,
@@ -266,12 +323,21 @@ impl IntoStr for String {
     }
 }
 
+/// this trait is to work around the lack of support for type aliases inside "impl" blocks.
+/// It is not intended to be generic, but to reduce the amount of boilerplate generic code so things are easier to read
 trait ArgsMethods<'a, R, S: IntoStr, T: Iterator<Item = S>> {
+    /// loops until the next string starting with "-" is found in args, and returns everything in between as an array of Values
     fn get_values_unbounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>;
+    /// same as get_values_unbounded, but with an upper bound on how many iterations we'll do.
     fn get_values_bounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>;
+    /// given an Arg attempts to extra the relevant number of Values from the input args,
+    /// and inserts them in Builder. If 0 args should be matched it will be inserted as a flag, otherwise it will be as params
     fn update_values(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
-    fn handle_arg_inner(&'a self, target: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
+    /// given a str starting with '-' tries to find a matching arg (using either short ('-') or long ("--") keys).
+    /// if the str is a multi-character short (e.g -rli) this will parse it as a flag combination.
+    /// if a match is found update_values is called
     fn handle_arg(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
+    /// loops through all the args looking for matching Arg definitions
     fn apply(&'a self, args: T) -> Result<R, Error>;
 }
 
@@ -362,11 +428,6 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
         self.try_insert_param(arg.name, res?, out)
     }
 
-    fn handle_arg_inner(&'a self, target: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
-        debug!("found arg {}", target.name);
-        self.update_values(target, args, out)
-    }
-
     fn handle_arg(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
         if arg.starts_with("--") {
             let arg = &arg[2..];
@@ -374,7 +435,8 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             for a in &self.args {
                 if let Some(i) = a.long {
                     if i == arg {
-                        return self.handle_arg_inner(&a, args, out);
+                        debug!("found arg {}", a.name);
+                        return self.update_values(a, args, out);
                     }
                 }
             }
@@ -388,7 +450,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             match (matches.next(), matches.next()) {
                 (Some(first), None) => {
                     debug!("single short found {}, trying to expand", arg);
-                    self.handle_arg_inner(first, args, out)
+                    self.update_values(first, args, out)
                 }
                 (Some(first), Some(second)) => {
                     debug!("flag combination found {}", arg);
@@ -507,18 +569,20 @@ impl<'a, R> Args<'a, R> {
         return command.apply(args);
     }
 
-    /*
-      Format:
-         ${about}
-
-         USAGE:
-            ${name} [SUBCOMMAND] [OPTIONS]
-         OPTIONS:
-            ${short}, ${long} ${value_name} ${num_values} ${about}
-            -h, --help Prints help information
-         SUBCOMMANDS (use ${name} ${subcommand} ${help} for more details):
-            ${name} - ${about}
-    */
+    /// Generates help text
+    /// Format:
+    /// ${about}
+    ///
+    /// USAGE:
+    ///     ${name} [SUBCOMMAND] [OPTIONS]
+    /// OPTIONS:
+    ///     -V, --version Print version info and exit
+    ///     ${short}, ${long} ${value_name} ${num_values} ${about}
+    ///     -h, --help Prints help information
+    /// SUBCOMMANDS (use ${name} ${subcommand} ${help} for more details):
+    ///     ${name} - ${about}
+    ///
+    /// @todo: currently value_name & num_values are not added
     fn generate_help(&self) -> String {
         let mut help = format!(
             "{}\nUSAGE:\n\t{} [SUBCOMMAND] [OPTIONS]\nOPTIONS:\n",
@@ -529,7 +593,6 @@ impl<'a, R> Args<'a, R> {
         if !self.args.is_empty() {
             help = self.args.iter().fold(help, |mut opt, arg| {
                 let has_comma = if arg.short.is_some() && arg.long.is_some() { 1 } else { 0 };
-                // @todo: factor in num_values
                 let size = arg.short.map_or(0, |s| s.len() + 2)
                     + arg.long.map_or(0, |s| s.len() + 3)
                     + has_comma
@@ -577,6 +640,8 @@ impl<'a, R> Args<'a, R> {
         help
     }
 
+    /// handles inserting or updating params in the builder. Note that just now updating is done by replacement
+    /// in future revisions this may be replaced with appending
     fn try_insert_param(&self, key: &'a str, value: Value, out: &mut Builder<'a>) -> Result<(), Error> {
         if !self.disable_overrides {
             out.params.insert(key, value);
@@ -591,6 +656,7 @@ impl<'a, R> Args<'a, R> {
         }
     }
 
+    /// handles inserting or updating flags in the builder
     fn try_insert_flag(&self, key: &'a str, out: &mut Builder<'a>) -> Result<(), Error> {
         debug!("inserting flag {}", key);
         match out.flags.entry(key) {
@@ -611,6 +677,9 @@ impl<'a, R> Args<'a, R> {
         }
     }
 
+    /// Attempts to fallback to library defined args (e.g help, version) if no match is found
+    /// note that because this is only called if matching is failed, it's safe to override by simply defining your own arg
+    /// These fallbacks will early exit, as is expected from --help --version commands
     fn handle_arg_missing(&self, arg: &str, _: &mut Builder<'a>) -> Result<(), Error> {
         match arg {
             "help" | "h" => {
@@ -626,6 +695,7 @@ impl<'a, R> Args<'a, R> {
     }
 }
 
+/// Small macro to avoid writing ..Default::default everywhere
 #[cfg(feature = "macros")]
 #[macro_export]
 macro_rules! args {
@@ -637,6 +707,7 @@ macro_rules! args {
     }
 }
 
+/// Small macro to avoid writing ..Default::default everywhere
 #[cfg(feature = "macros")]
 #[macro_export]
 macro_rules! arg {
@@ -1568,7 +1639,7 @@ mod tests {
             }],
             handler: |r| assert_has!(vec!["1", "2"], r, "arg"),
         };
-        assert_eq!(Err(Error::WrongNumValues("arg", &NumValues::Fixed(2), Value::Array(vec![Value::String("1".to_string())]))), 
+        assert_eq!(Err(Error::WrongNumValues("arg", &NumValues::Fixed(2), Value::Array(vec![Value::String("1".to_string())]))),
             args.parse(vec!["prog", "--arg", "1", "--arg", "2"]));
     });
 }

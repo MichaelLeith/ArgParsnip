@@ -7,7 +7,7 @@ Add the lib to your `Cargo.toml`.
 
 ```
 [dependencies]
-argparsnip = "0.1.3"
+argparsnip = "0.1.4"
 ```
 
 # Features
@@ -57,7 +57,7 @@ argparsnip = "0.1.3"
 Here are some quick common cases. For more examples please look at the tests in `lib.rs`
 
 ## Documentation
-https://docs.rs/argparsnip/0.1.3/argparsnip/
+https://docs.rs/argparsnip/0.1.4/argparsnip/
 
 ## Examples
 

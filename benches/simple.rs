@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use argparsnip::{Arg, Args, NumValues, Results};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 macro_rules! create_args {
     () => {{
