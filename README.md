@@ -168,8 +168,8 @@ fn main() {
 * Benchmarks
 * More tests
 * Features
-** Support positional arguments
-** Bash/Zsh completion
-** Support disabling positional args
-** Support updating repeats, e.g --arg Foo --arg Bar should give {"arg": ["Foo", "Bar"]} 
+  * Support positional arguments
+  * Bash/Zsh completion
+  * Support disabling positional args
+  * Support updating repeats, e.g --arg Foo --arg Bar should give {"arg": ["Foo", "Bar"]} 
 * Pretty sure my design isn't iterator friendly, try using a counter instead
