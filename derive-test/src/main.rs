@@ -3,9 +3,6 @@ use parsnip::Args;
 fn main() {
     let data = r#"
     {
-        "name": "derive-test",
-        "about": "example using serde",
-        "version": "1.0",
         "subcommands": [{
             "name": "sub",
             "path": "derive-test sub",

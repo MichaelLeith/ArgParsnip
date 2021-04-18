@@ -162,12 +162,14 @@ impl Default for FilterType {
 
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Args<'a, T = Results<'a>> {
+    #[cfg_attr(feature = "derive", serde(default = "name_default"))]
     pub name: &'a str,
     // @todo: we should support deriving this
     #[cfg_attr(feature = "derive", serde(default))]
     pub path: Option<&'a str>,
+    #[cfg_attr(feature = "derive", serde(default = "version_default"))]
     pub version: &'a str,
-    #[cfg_attr(feature = "derive", serde(default))]
+    #[cfg_attr(feature = "derive", serde(default = "about_default"))]
     pub about: &'a str,
     #[cfg_attr(feature = "derive", serde(default))]
     pub args: Vec<Arg<'a>>,
@@ -181,6 +183,18 @@ pub struct Args<'a, T = Results<'a>> {
     pub handler: fn(Results<'a>) -> T,
     #[cfg_attr(feature = "derive", serde(default))]
     pub filters: Filters<'a>,
+}
+
+fn name_default<'a>() -> &'a str {
+    env!("CARGO_PKG_NAME")
+}
+
+fn version_default<'a>() -> &'a str {
+    env!("CARGO_PKG_VERSION") 
+}
+
+fn about_default<'a>() -> &'a str {
+    env!("CARGO_PKG_DESCRIPTION") 
 }
 
 #[cfg(feature = "derive")]
@@ -208,10 +222,10 @@ impl<'a> Handler<'a, Results<'a>> for Results<'a> {
 impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
     fn default() -> Self {
         Args {
-            name: Default::default(),
+            name: name_default(),
             path: Default::default(),
-            version: Default::default(),
-            about: Default::default(),
+            version: version_default(),
+            about: about_default(),
             args: Default::default(),
             disable_overrides: Default::default(),
             subcommands: Default::default(),
@@ -485,7 +499,7 @@ impl<'a, R> Args<'a, R> {
                 exit(0);
                 // @todo
             } else if arg == "version" {
-                println!("{} {}", command.name, command.version);
+                println!("{} {}", self.path.unwrap_or(self.name), command.version);
                 exit(0)
             } else {
                 break;
@@ -607,7 +621,7 @@ impl<'a, R> Args<'a, R> {
                 exit(0);
             }
             "version" | "V" => {
-                println!("{} {}", self.name, self.version);
+                println!("{} {}", self.path.unwrap_or(self.name), self.version);
                 exit(0);
             }
             _ => Err(Error::UnknownArg(String::from(arg))),
@@ -1623,5 +1637,20 @@ mod tests {
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg", "-a"]));
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3", "-a"]));
         assert_eq!(Err(Error::BadInput), args.parse(vec!["prog", "--arg3", "-a", "--arg"]));
+    });
+
+    test!(test_multiple_values_split_unsupported() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                long: Some("arg"),
+                num_values: NumValues::Fixed(2),
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(vec!["1", "2"], r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Err(Error::WrongNumValues("arg", &NumValues::Fixed(2), Value::Array(vec![Value::String("1".to_string())]))), 
+            args.parse(vec!["prog", "--arg", "1", "--arg", "2"]));
     });
 }
