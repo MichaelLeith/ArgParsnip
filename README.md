@@ -159,6 +159,48 @@ fn main() {
 }
 ```
 
+**Filters**
+```
+// only supports combinations (--arg && --arg2) or (--arg && --arg3)
+// will fail if --arg or --arg2 or --arg3 are passed on their own
+fn main() {
+    let args = Args {
+        args: vec![Arg {
+            name: "arg",
+            long: Some("arg"),
+            num_values: NumValues::None,
+            ..Default::default()
+        }, Arg {
+            name: "arg2",
+            long: Some("arg2"),
+            num_values: NumValues::None,
+            ..Default::default()
+        }, Arg {
+            name: "arg3",
+            long: Some("arg3"),
+            num_values: NumValues::None,
+            ..Default::default()
+        }],
+        filters: Filters {
+            filters: vec![Filter {
+                filter_type: FilterType::All,
+                inverse: false,
+                args: vec!["arg", "arg2"],
+            }, Filter {
+                filter_type: FilterType::All,
+                inverse: false,
+                args: vec!["arg", "arg3"],
+            }],
+            ..Default::default()
+        },
+        // this flag means we will fail if we see the same value multiple times
+        disable_overrides: true,
+        ..Default::default()
+    };
+    let results = args.parse(std::env::args());
+}
+```
+
 ## Documentation
 
 # Development
