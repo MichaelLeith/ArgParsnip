@@ -9,13 +9,16 @@ use serde::{Deserialize, Serialize};
 
 mod value;
 
-use std::collections::{
-    hash_map::Entry::{Occupied, Vacant},
-    HashMap,
-};
 use std::iter::Peekable;
 use std::string::String;
 use std::vec::Vec;
+use std::{
+    collections::{
+        hash_map::Entry::{Occupied, Vacant},
+        HashMap,
+    },
+    process::exit,
+};
 
 use crate::value::{cast_type, check_type, Type, Value};
 use unicode_segmentation::UnicodeSegmentation;
@@ -25,7 +28,7 @@ use log::debug;
 
 #[cfg(not(feature = "debug"))]
 macro_rules! debug {
-    ($($arg:tt)+) => {}
+    ($($arg:tt)+) => {};
 }
 
 #[derive(PartialEq, Debug)]
@@ -159,14 +162,11 @@ impl Default for FilterType {
 
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Args<'a, T = Results<'a>> {
-    #[cfg_attr(feature = "derive", serde(default))]
     pub name: &'a str,
+    // @todo: we should support deriving this
     #[cfg_attr(feature = "derive", serde(default))]
     pub path: Option<&'a str>,
-    #[cfg_attr(feature = "derive", serde(default))]
     pub version: &'a str,
-    #[cfg_attr(feature = "derive", serde(default))]
-    pub author: &'a str,
     #[cfg_attr(feature = "derive", serde(default))]
     pub about: &'a str,
     #[cfg_attr(feature = "derive", serde(default))]
@@ -211,7 +211,6 @@ impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
             name: Default::default(),
             path: Default::default(),
             version: Default::default(),
-            author: Default::default(),
             about: Default::default(),
             args: Default::default(),
             disable_overrides: Default::default(),
@@ -301,7 +300,6 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
         debug!("found params {:?}", params);
         Ok(params)
     }
-
 
     fn update_values(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
         debug!("getting values for {}", arg.name);
@@ -483,17 +481,89 @@ impl<'a, R> Args<'a, R> {
                 args.next();
                 command = arg;
             } else if arg == "help" {
+                print!("{}", command.generate_help());
+                exit(0);
                 // @todo
+            } else if arg == "version" {
+                println!("{} {}", command.name, command.version);
+                exit(0)
             } else {
-                return command.apply(args);
+                break;
             }
         }
         debug!("applying command {}", command.name);
         return command.apply(args);
     }
 
-    fn generate_help(&self) -> Value {
-        Value::None
+    /*
+      Format:
+         ${about}
+
+         USAGE:
+            ${name} [SUBCOMMAND] [OPTIONS]
+         OPTIONS:
+            ${short}, ${long} ${value_name} ${num_values} ${about}
+            -h, --help Prints help information
+         SUBCOMMANDS (use ${name} ${subcommand} ${help} for more details):
+            ${name} - ${about}
+    */
+    fn generate_help(&self) -> String {
+        // @todo: need to include parents name, e.g prog sub --helps
+        let mut help = format!(
+            "{}\nUSAGE:\n\t{} [SUBCOMMAND] [OPTIONS]\nOPTIONS:\n",
+            self.about,
+            self.path.unwrap_or(self.name)
+        );
+        help.push_str("\t-V, --version Print version info and exit\n");
+        if !self.args.is_empty() {
+            help = self.args.iter().fold(help, |mut opt, arg| {
+                let has_comma = if arg.short.is_some() && arg.long.is_some() { 1 } else { 0 };
+                // @todo: factor in num_values
+                let size = arg.short.map_or(0, |s| s.len() + 2)
+                    + arg.long.map_or(0, |s| s.len() + 3)
+                    + has_comma
+                    + arg.value_name.map_or(0, |s| s.len() + 1)
+                    + arg.about.len();
+                opt.reserve(size + 2);
+                opt.push_str("\t");
+                if let Some(s) = arg.short {
+                    opt.push('-');
+                    opt.push_str(s);
+                    if has_comma == 1 {
+                        opt.push(',');
+                    }
+                    opt.push(' ');
+                }
+                if let Some(s) = arg.long {
+                    opt.push_str("--");
+                    opt.push_str(s);
+                    opt.push(' ');
+                }
+                if let Some(s) = arg.value_name {
+                    opt.push_str(s);
+                    opt.push(' ');
+                }
+                opt.push_str(arg.about);
+                opt.push('\n');
+                opt
+            });
+        }
+        help.push_str("\t-h, --help Prints help information\n");
+        if !self.subcommands.is_empty() {
+            help.push_str("SUBCOMMANDS (use ");
+            help.push_str(self.name);
+            help.push_str(" [SUBCOMMAND] help for more details):\n");
+            help = self.subcommands.iter().fold(help, |mut opt, arg| {
+                let size = arg.name.len() + 1 + arg.about.len();
+                opt.reserve(size + 1);
+                opt.push_str(arg.name);
+                opt.push(' ');
+                opt.push_str(arg.about);
+                opt.push('\n');
+                opt
+            });
+        }
+        help
     }
 
     fn try_insert_param(&self, key: &'a str, value: Value, out: &mut Builder<'a>) -> Result<(), Error> {
@@ -511,25 +581,35 @@ impl<'a, R> Args<'a, R> {
     }
 
     fn try_insert_flag(&self, key: &'a str, out: &mut Builder<'a>) -> Result<(), Error> {
+        debug!("inserting flag {}", key);
         match out.flags.entry(key) {
             Occupied(mut e) => {
                 if self.disable_overrides {
                     Err(Error::Override(key))
                 } else {
+                    debug!("incrementing count {}", e.get());
                     e.insert(e.get() + 1);
                     Ok(())
                 }
             }
             Vacant(e) => {
+                debug!("new flag found");
                 e.insert(1);
                 Ok(())
             }
         }
     }
 
-    fn handle_arg_missing(&self, arg: &str, out: &mut Builder<'a>) -> Result<(), Error> {
+    fn handle_arg_missing(&self, arg: &str, _: &mut Builder<'a>) -> Result<(), Error> {
         match arg {
-            "--help" | "-h" => self.try_insert_param("help", self.generate_help(), out),
+            "help" | "h" => {
+                print!("{}", self.generate_help());
+                exit(0);
+            }
+            "version" | "V" => {
+                println!("{} {}", self.name, self.version);
+                exit(0);
+            }
             _ => Err(Error::UnknownArg(String::from(arg))),
         }
     }
@@ -1110,6 +1190,7 @@ mod tests {
         let args = Args {
             args: vec![Arg {
                 name: "arg",
+                long: Some("arg"),
                 short: Some("A"),
                 num_values: NumValues::None,
                 ..Default::default()
@@ -1117,7 +1198,7 @@ mod tests {
             handler: |r| r.flags["arg"],
             ..Default::default()
         };
-        assert_eq!(Ok(2), args.parse(vec!["prog", "-AA"]));
+        assert_eq!(Ok(4), args.parse(vec!["prog", "-AA", "--arg", "-A"]));
     });
 
     test!(test_positional_after_double_dash() {
