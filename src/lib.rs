@@ -20,9 +20,15 @@ use std::vec::Vec;
 use crate::value::{cast_type, check_type, Type, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
+#[cfg(feature = "debug")]
 use log::debug;
 
-#[derive(Debug, PartialEq)]
+#[cfg(not(feature = "debug"))]
+macro_rules! debug {
+    ($($arg:tt)+) => {}
+}
+
+#[derive(PartialEq, Debug)]
 pub enum Error<'a> {
     UnknownArg(String),
     InvalidArg,
@@ -36,7 +42,7 @@ pub enum Error<'a> {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 #[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
 pub enum NumValues {
     None,
@@ -103,21 +109,14 @@ impl<'a> std::default::Default for Arg<'a> {
         }
     }
 }
-
-impl<'a> std::fmt::Debug for Arg<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
+#[cfg_attr(feature = "debug", derive(Debug))]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub enum FilterType {
     All,
     Any,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Filters<'a> {
     #[cfg_attr(feature = "derive", serde(default))]
@@ -128,7 +127,8 @@ pub struct Filters<'a> {
     pub inverse: bool,
 }
 
-#[derive(Default, Debug)]
+#[cfg_attr(feature = "debug", derive(Debug))]
+#[derive(Default)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Filter<'a> {
     #[cfg_attr(feature = "derive", serde(default))]
@@ -157,7 +157,6 @@ impl Default for FilterType {
     }
 }
 
-#[derive(Debug)]
 #[cfg_attr(feature = "derive", derive(Deserialize))]
 pub struct Args<'a, T = Results<'a>> {
     #[cfg_attr(feature = "derive", serde(default))]
@@ -259,7 +258,7 @@ trait ArgsMethods<'a, R, S: IntoStr, T: Iterator<Item = S>> {
     fn get_values_unbounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>;
     fn get_values_bounded(&self, arg: &Arg, args: &mut Peekable<T>, est: usize) -> Result<Vec<Value>, Error>;
     fn update_values(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
-    fn handle_arg_inner(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
+    fn handle_arg_inner(&'a self, target: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
     fn handle_arg(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error>;
     fn apply(&'a self, args: T) -> Result<R, Error>;
 }
@@ -352,8 +351,8 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
         self.try_insert_param(arg.name, res?, out)
     }
 
-    fn handle_arg_inner(&'a self, target: &'a Arg, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
-        debug!("found arg {} matching {}", target.name, arg);
+    fn handle_arg_inner(&'a self, target: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
+        debug!("found arg {}", target.name);
         self.update_values(target, args, out)
     }
 
@@ -364,7 +363,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             for a in &self.args {
                 if let Some(i) = a.long {
                     if i == arg {
-                        return self.handle_arg_inner(&a, arg, args, out);
+                        return self.handle_arg_inner(&a, args, out);
                     }
                 }
             }
@@ -378,7 +377,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             match (matches.next(), matches.next()) {
                 (Some(first), None) => {
                     debug!("single short found {}, trying to expand", arg);
-                    self.handle_arg_inner(first, arg, args, out)
+                    self.handle_arg_inner(first, args, out)
                 }
                 (Some(first), Some(second)) => {
                     debug!("flag combination found {}", arg);
