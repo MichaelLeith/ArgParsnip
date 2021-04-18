@@ -164,7 +164,6 @@ impl Default for FilterType {
 pub struct Args<'a, T = Results<'a>> {
     #[cfg_attr(feature = "derive", serde(default = "name_default"))]
     pub name: &'a str,
-    // @todo: we should support deriving this
     #[cfg_attr(feature = "derive", serde(default))]
     pub path: Option<&'a str>,
     #[cfg_attr(feature = "derive", serde(default = "version_default"))]
@@ -497,7 +496,6 @@ impl<'a, R> Args<'a, R> {
             } else if arg == "help" {
                 print!("{}", command.generate_help());
                 exit(0);
-                // @todo
             } else if arg == "version" {
                 println!("{} {}", self.path.unwrap_or(self.name), command.version);
                 exit(0)
@@ -522,7 +520,6 @@ impl<'a, R> Args<'a, R> {
             ${name} - ${about}
     */
     fn generate_help(&self) -> String {
-        // @todo: need to include parents name, e.g prog sub --helps
         let mut help = format!(
             "{}\nUSAGE:\n\t{} [SUBCOMMAND] [OPTIONS]\nOPTIONS:\n",
             self.about,
@@ -1263,10 +1260,33 @@ mod tests {
                 },
                 ..Default::default()
             }],
-            handler: |r| !r.params.contains_key("a"),
+            handler: |r| r.params.contains_key("arg"),
             ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
+    });
+
+    test!(test_validation_vec() {
+        let args = Args {
+            args: vec![Arg {
+                name: "arg",
+                short: Some("a"),
+                num_values: NumValues::AtLeast(1),
+                value_type: Type::Int,
+                validation: |v| {
+                    let s: &i32 = v.try_into().unwrap();
+                    if 2 >= *s {
+                        Ok(())
+                    } else {
+                        Err("oh noes".to_string())
+                    }
+                },
+                ..Default::default()
+            }],
+            handler: |r| assert_has!(vec![&1, &2], r, "arg"),
+            ..Default::default()
+        };
+        assert_eq!(Ok(1), args.parse(vec!["prog", "-a", "1", "2"]));
     });
 
     test!(test_validation_unbounded() {
@@ -1285,7 +1305,7 @@ mod tests {
                 },
                 ..Default::default()
             }],
-            handler: |r| !r.params.contains_key("a"),
+            handler: |r| r.params.contains_key("arg"),
             ..Default::default()
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
@@ -1307,7 +1327,7 @@ mod tests {
                 },
                 ..Default::default()
             }],
-            handler: |r| !r.params.contains_key("a"),
+            handler: |r| !r.params.contains_key("arg"),
             ..Default::default()
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
@@ -1330,7 +1350,7 @@ mod tests {
                 },
                 ..Default::default()
             }],
-            handler: |r| !r.params.contains_key("a"),
+            handler: |r| !r.params.contains_key("arg"),
             ..Default::default()
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
