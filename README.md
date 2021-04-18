@@ -7,15 +7,7 @@ Add the lib to your `Cargo.toml`.
 
 ```
 [dependencies]
-parsnip = "0.1.0"
-```
-
-# Setup
-Add the lib to your `Cargo.toml`.
-
-```
-[dependencies]
-parsnip = "0.1.0"
+argparsnip = "0.1.2"
 ```
 
 # Features
