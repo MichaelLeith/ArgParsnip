@@ -4,7 +4,7 @@ extern crate alloc;
 #[cfg(test)]
 mod test {
     use alloc::vec;
-    use parsnip::{Arg, Args, NumValues};
+    use argparsnip::{Arg, Args, NumValues};
 
     #[test]
     fn test() {

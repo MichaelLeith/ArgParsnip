@@ -1,4 +1,4 @@
-use parsnip::Args;
+use argparsnip::Args;
 
 fn main() {
     let data = r#"
@@ -27,7 +27,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use parsnip::Args;
+    use argparsnip::Args;
 
     #[test]
     fn test_deserialize() {

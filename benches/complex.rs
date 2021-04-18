@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use parsnip::{Arg, Args, NumValues, Results};
+use argparsnip::{Arg, Args, NumValues, Results};
 use std::convert::TryInto;
 
 macro_rules! create_app {

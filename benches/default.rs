@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use parsnip::{Args, Results};
+use argparsnip::{Args, Results};
 
 pub fn build_empty(c: &mut Criterion) {
     c.bench_function("build_empty", |b| b.iter(|| Args::<Results>::default()));

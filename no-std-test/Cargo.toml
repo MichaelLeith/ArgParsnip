@@ -8,4 +8,4 @@ description = "simple test module to check no-std support for parsnip"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-parsnip = { path = "..", features = ["no-std"] }
+argparsnip = { path = "..", features = ["no-std"] }

@@ -38,6 +38,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "argparsnip"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hashbrown",
+ "log",
+ "pprof",
+ "pretty_assertions",
+ "serde",
+ "simple_logger",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -305,7 +319,7 @@ dependencies = [
 name = "derive-test"
 version = "0.1.0"
 dependencies = [
- "parsnip",
+ "argparsnip",
  "serde_json",
 ]
 
@@ -516,7 +530,7 @@ dependencies = [
 name = "no-std-test"
 version = "0.1.0"
 dependencies = [
- "parsnip",
+ "argparsnip",
 ]
 
 [[package]]
@@ -614,20 +628,6 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "winapi",
-]
-
-[[package]]
-name = "parsnip"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "hashbrown",
- "log",
- "pprof",
- "pretty_assertions",
- "serde",
- "simple_logger",
- "unicode-segmentation",
 ]
 
 [[package]]
