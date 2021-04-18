@@ -7,7 +7,6 @@ macro_rules! create_args {
             name: "parsnip tests",
             version: "0.1",
             about: "test parsnip lib",
-            author: "Author <email@email.com>",
             args: vec![
                 Arg {
                     name: "flag",

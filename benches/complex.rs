@@ -8,7 +8,6 @@ macro_rules! create_app {
             name: "parsnip tests",
             version: "0.1",
             about: "test parsnip lib",
-            author: "Author <email@email.com>",
             args: vec![
                 Arg {
                     name: "option",
@@ -112,7 +111,6 @@ macro_rules! create_app {
                 name: "subcmd",
                 version: "0.1",
                 about: "tests subcommands",
-                author: "Author <email@email.com>",
                 args: vec![Arg {
                     name: "option",
                     short: Some("o"),

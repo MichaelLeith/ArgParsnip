@@ -1,9 +1,16 @@
 [package]
 name = "parsnip"
+description = "A small Argparser"
 version = "0.1.0"
 authors = ["TeamTeamWork <8036404+MichaelLeith@users.noreply.github.com>"]
 edition = "2018"
-include = ["src/**/*", "README.md"]
+include = ["src/**/*", "LICENSE", "README.md"]
+license = "MIT"
+licenseFile = "LICENSE"
+readme = "README.md"
+homepage = "https://github.com/MichaelLeith/Parsnip"
+repository = "https://github.com/MichaelLeith/Parsnip"
+categories = ["command-line-interface", "no-std"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -44,15 +51,20 @@ default-members = [
 ]
 
 # Benchmarks
+[lib]
+bench = false
 
 [[bench]]
 name = "default"
 harness = false
+path = "benches/default.rs"
 
 [[bench]]
 name = "simple"
 harness = false
+path = "benches/simple.rs"
 
 [[bench]]
 name = "complex"
 harness = false
+path = "benches/complex.rs"
