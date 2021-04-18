@@ -1,6 +1,6 @@
 # Parsnip
 
-A small Argparser
+A small Rust Argparser
 
 # Setup
 Add the lib to your `Cargo.toml`.
