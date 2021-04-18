@@ -60,6 +60,24 @@ https://docs.rs/argparsnip/0.1.2/argparsnip/
 
 ## Examples
 
+**Minimal Flag Example**
+
+```
+// ./prog --arg
+fn main() {
+    let args = Args {
+        args: vec![Arg {
+            name: "arg",
+            short: Some("a"),
+            ..Default::default()
+        }],
+        ..Default::default() 
+    };
+    let results = args.parse(std::env::args());
+    assert_eq!(1, results.flags("arg"));
+}
+```
+
 **Check if a flag was given once**
 
 ```
