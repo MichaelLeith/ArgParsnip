@@ -157,7 +157,7 @@ impl Into<String> for Value {
 impl<'a> TryInto<&'a str> for &'a Value {
     type Error = Error<'a>;
 
-    fn try_into(self) -> Result<&'a str, Error<'a>> {
+    fn try_into(self) -> Result<&'a str, Self::Error> {
         match self {
             Value::String(b) => Ok(b),
             e => Err(Error::WrongValueType(e.clone())),
@@ -168,7 +168,7 @@ impl<'a> TryInto<&'a str> for &'a Value {
 impl<'a> TryInto<Vec<&'a str>> for &'a Value {
     type Error = Error<'a>;
 
-    fn try_into(self) -> Result<Vec<&'a str>, Error<'a>> {
+    fn try_into(self) -> Result<Vec<&'a str>, Self::Error> {
         match self {
             Value::Array(arr) => {
                 let mut vec = Vec::with_capacity(arr.len());

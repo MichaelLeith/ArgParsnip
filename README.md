@@ -7,7 +7,7 @@ Add the lib to your `Cargo.toml`.
 
 ```
 [dependencies]
-argparsnip = "0.1.4"
+argparsnip = "0.1.5"
 ```
 
 # Features
@@ -19,6 +19,7 @@ argparsnip = "0.1.4"
 * **Arguments**
   - supports short `-h` and `--help` syntax
   - unicode support by default
+  - supports returning (as a vec) or failing on unknown arguments
   - **Flags**
     - supports combinations (e.g `-rli` is the same as `-r -l -i`)
     - supports repeats, e.g `-vvv -v` will count as the same flag `v` appearing 4 times
@@ -57,7 +58,7 @@ argparsnip = "0.1.4"
 Here are some quick common cases. For more examples please look at the tests in `lib.rs`
 
 ## Documentation
-https://docs.rs/argparsnip/0.1.4/argparsnip/
+https://docs.rs/argparsnip/0.1.5/argparsnip/
 
 ## Examples
 

@@ -34,7 +34,7 @@ macro_rules! debug {
 
 #[derive(PartialEq, Debug)]
 pub enum Error<'a> {
-    UnknownArg(String),
+    UnknownArg,
     InvalidArg,
     MissingRequiredArgs(Vec<&'a str>),
     WrongNumValues(&'a str, &'a NumValues, Value),
@@ -42,6 +42,7 @@ pub enum Error<'a> {
     WrongCastType(String),
     InvalidValue(String, String),
     Override(&'a str),
+    UnknownArgs(Vec<String>),
     BadInput,
 }
 
@@ -170,8 +171,8 @@ impl<'a> Filter<'a> {
     fn test(&self, builder: &Builder<'a>) -> usize {
         debug!("applying filter {:?} to {:?}", self, builder);
         let res = match self.filter_type {
-            FilterType::All => self.args.iter().all(|p| builder.params.contains_key(p) || builder.flags.contains_key(p)),
-            FilterType::Any => self.args.iter().any(|p| builder.params.contains_key(p) || builder.flags.contains_key(p)),
+            FilterType::All => self.args.iter().all(|p| builder.args.contains_key(p) || builder.flags.contains_key(p)),
+            FilterType::Any => self.args.iter().any(|p| builder.args.contains_key(p) || builder.flags.contains_key(p)),
         };
         debug!("filter result: {}, using inverse: {}", res, self.inverse);
         (res ^ self.inverse) as usize
@@ -216,6 +217,9 @@ pub struct Args<'a, T = Results<'a>> {
     /// Whether to fail if an arg is seen multiple times. Defaults to false
     #[cfg_attr(feature = "derive", serde(default))]
     pub disable_overrides: bool,
+    /// Whether to fail if any unknown args are given. Defaults to false
+    #[cfg_attr(feature = "derive", serde(default))]
+    pub fail_on_unknown_args: bool,
     /// List of subcommands underneath this command
     #[cfg_attr(feature = "derive", serde(default = "default_vec"))]
     pub subcommands: Vec<Args<'a, T>>,
@@ -271,6 +275,7 @@ impl<'a, T: Handler<'a, T>> Default for Args<'a, T> {
             about: about_default(),
             args: Default::default(),
             disable_overrides: Default::default(),
+            fail_on_unknown_args: Default::default(),
             subcommands: Default::default(),
             handler: T::handler(),
             filters: Default::default(),
@@ -289,10 +294,9 @@ pub struct Results<'a> {
     /// mapping of args to the values seen for them
     /// if it is specified that the arg should only match one time this will be a single Value,
     /// otherwise it will be a Value::Array
-    pub params: HashMap<&'a str, Value>,
+    pub args: HashMap<&'a str, Value>,
     /// list of params seen that were not recognised
-    /// @todo: support failing if this isn't empty
-    pub unknown_params: Vec<String>,
+    pub unknown_args: Vec<String>,
     /// list of positional arguments seen
     /// note that while in the current implementation these can be interspersed between args,
     /// e.g --flag positional --flag2 is considered valid
@@ -304,7 +308,7 @@ pub struct Results<'a> {
 #[derive(Default, Debug)]
 struct Builder<'a> {
     flags: HashMap<&'a str, i32>,
-    params: HashMap<&'a str, Value>,
+    args: HashMap<&'a str, Value>,
 }
 
 pub trait IntoStr {
@@ -473,14 +477,14 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
         debug!("parsing args using command {}", self.name);
         // @todo: I wonder if we can avoid hashing with compile time magic?
         let mut builder = Builder {
-            params: HashMap::new(),
+            args: HashMap::new(),
             flags: HashMap::new(),
         };
-        let mut unknown_params = Vec::with_capacity(0);
+        let mut unknown_args = Vec::with_capacity(0);
         let mut positional = Vec::with_capacity(0);
         let mut args = args.peekable();
-        while let Some(arg) = args.next() {
-            let arg = (&arg).into();
+        while let Some(a) = args.next() {
+            let arg = (&a).into();
             // an argument :O time to start searching!
             if arg.starts_with("-") {
                 if arg == "--" {
@@ -489,7 +493,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
                 } else {
                     debug!("found arg {}", arg);
                     match self.handle_arg(&arg, &mut args, &mut builder) {
-                        Err(Error::UnknownArg(arg)) => unknown_params.push(arg),
+                        Err(Error::UnknownArg) => unknown_args.push(arg.to_string()),
                         Err(e) => return Err(e),
                         _ => {}
                     }
@@ -500,13 +504,17 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             }
         }
         debug!("finished looping through args, running postprocessing");
+        if self.fail_on_unknown_args && !unknown_args.is_empty() {
+            return Err(Error::UnknownArgs(unknown_args));
+        }
+
         // @todo: is there a way we can make this opt-in?
         let mut missing = Vec::with_capacity(0);
         for param in self.args.iter().filter(|p| p.num_values != NumValues::None) {
-            if param.required && !builder.params.contains_key(param.name) {
+            if param.required && !builder.args.contains_key(param.name) {
                 missing.push(param.name);
             } else if let Some(default) = &param.default {
-                if let Vacant(v) = builder.params.entry(param.name) {
+                if let Vacant(v) = builder.args.entry(param.name) {
                     debug!("using default value for {}", param.name);
                     let val = v.insert(default());
                     if !check_type(&param.value_type, val) {
@@ -535,8 +543,8 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
         Ok((self.handler)(Results {
             path: self.path.unwrap_or(self.name),
             flags: builder.flags,
-            params: builder.params,
-            unknown_params,
+            args: builder.args,
+            unknown_args,
             positional,
         }))
     }
@@ -644,10 +652,10 @@ impl<'a, R> Args<'a, R> {
     /// in future revisions this may be replaced with appending
     fn try_insert_param(&self, key: &'a str, value: Value, out: &mut Builder<'a>) -> Result<(), Error> {
         if !self.disable_overrides {
-            out.params.insert(key, value);
+            out.args.insert(key, value);
             return Ok(());
         }
-        match out.params.entry(key) {
+        match out.args.entry(key) {
             Occupied(_) => Err(Error::Override(key)),
             Vacant(e) => {
                 e.insert(value);
@@ -690,7 +698,7 @@ impl<'a, R> Args<'a, R> {
                 println!("{} {}", self.path.unwrap_or(self.name), self.version);
                 exit(0);
             }
-            _ => Err(Error::UnknownArg(String::from(arg))),
+            _ => Err(Error::UnknownArg),
         }
     }
 }
@@ -743,7 +751,7 @@ mod tests {
 
     macro_rules! assert_has {
         ($expected:expr, $results:ident, $key:literal) => {
-            if let Some(arg) = $results.params.get($key) {
+            if let Some(arg) = $results.args.get($key) {
                 assert_eq!(Ok($expected), arg.try_into());
                 1
             } else {
@@ -770,8 +778,8 @@ mod tests {
         assert_eq!(Ok(Results {
             path: "main/sub",
             flags,
-            params: HashMap::new(),
-            unknown_params: vec!["u".to_string()],
+            args: HashMap::new(),
+            unknown_args: vec!["-u".to_string()],
             positional: vec!["lol".to_string()],
         }), args.parse(vec!["prog", "sub", "--arg", "lol", "-u"]));
     });
@@ -795,7 +803,7 @@ mod tests {
                 long: Some("arg"),
                 num_values: NumValues::Fixed(1),
             }],
-            handler: |r| if r.params.contains_key("arg") { 1 } else { 0 },
+            handler: |r| if r.args.contains_key("arg") { 1 } else { 0 },
         };
         assert_eq!(
             Err(Error::WrongNumValues("arg", &NumValues::Fixed(1), Value::from(vec![]))),
@@ -916,7 +924,7 @@ mod tests {
                 long: Some("arg"),
                 num_values: NumValues::None,
             }],
-            handler: |r| if r.params.contains_key("arg") { 1 } else { 0 },
+            handler: |r| if r.args.contains_key("arg") { 1 } else { 0 },
         };
         assert_eq!(Ok(0), args.parse(vec!["prog"]));
     });
@@ -1146,7 +1154,7 @@ mod tests {
                 long: Some("arg"),
                 num_values: NumValues::None,
             }],
-            handler: |r| !r.params.contains_key("arg"),
+            handler: |r| !r.args.contains_key("arg"),
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-arg"]));
     });
@@ -1270,7 +1278,7 @@ mod tests {
                     }
                 },
             }],
-            handler: |r| r.params.contains_key("arg"),
+            handler: |r| r.args.contains_key("arg"),
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
     });
@@ -1311,7 +1319,7 @@ mod tests {
                     }
                 },
             }],
-            handler: |r| r.params.contains_key("arg"),
+            handler: |r| r.args.contains_key("arg"),
         };
         assert_eq!(Ok(true), args.parse(vec!["prog", "-a", "abc"]));
     });
@@ -1331,7 +1339,7 @@ mod tests {
                     }
                 },
             }],
-            handler: |r| !r.params.contains_key("arg"),
+            handler: |r| !r.args.contains_key("arg"),
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
         args.parse(vec!["prog", "-a", "abcdef"]));
@@ -1352,7 +1360,7 @@ mod tests {
                     }
                 },
             }],
-            handler: |r| !r.params.contains_key("arg"),
+            handler: |r| !r.args.contains_key("arg"),
         };
         assert_eq!(Err(Error::InvalidValue("abcdef".to_string(), "oh noes".to_string())),
         args.parse(vec!["prog", "-a", "abcdef"]));
@@ -1641,5 +1649,21 @@ mod tests {
         };
         assert_eq!(Err(Error::WrongNumValues("arg", &NumValues::Fixed(2), Value::Array(vec![Value::String("1".to_string())]))),
             args.parse(vec!["prog", "--arg", "1", "--arg", "2"]));
+    });
+
+    test!(test_fail_on_unknown_args() {
+        let args = args! {
+            args: vec![arg! {
+                name: "arg",
+                long: Some("arg"),
+                num_values: NumValues::Fixed(2),
+            }],
+            fail_on_unknown_args: true,
+            handler: |r| assert_has!(vec!["1", "2"], r, "arg"),
+        };
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "1", "2"]));
+        assert_eq!(Err(Error::UnknownArgs(vec!["-u".to_string()])), args.parse(vec!["prog", "--arg", "1", "2", "-u"]));
+        assert_eq!(Err(Error::UnknownArgs(vec!["--u".to_string()])), args.parse(vec!["prog", "--arg", "1", "2", "--u"]));
+        assert_eq!(Err(Error::UnknownArgs(vec!["-u".to_string(), "--u".to_string()])), args.parse(vec!["prog", "-u", "--arg", "1", "2", "--u"]));
     });
 }
