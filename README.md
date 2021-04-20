@@ -2,6 +2,28 @@
 
 A small Rust Argparser
 
+```
+// ./prog --arg param1 param2 -a
+fn main() {
+    let args = args! {
+        // define all your args here
+        args: vec![arg! {
+            name: "arg",
+            short: Some("a"),
+        }, arg! {
+            name: "arg2",
+            long: Some("arg2"),
+            num_values: NumValues::Between(1, 3),
+        }],
+        // subcommands (e.g git add)
+        subcommands: vec![args! {}],
+        // optional, by default parsing will return a "Results" object
+        handler: |results| { return results.args.get("arg2"); }
+    };
+    let results = args.parse(std::env::args());
+}
+```
+
 # Setup
 Add the lib to your `Cargo.toml`.
 
