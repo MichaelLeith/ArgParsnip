@@ -51,7 +51,7 @@ pub enum Error<'a> {
 /// if flags are seen multiple times (e.g -vvv) we need to handle that as extra verbose by exposing the number of repetitions.
 /// This isn't needed for normal flags though - just now we overwrite them, but in the future we may move to appending there
 #[allow(dead_code)]
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Debug)]
 #[cfg_attr(feature = "derive", derive(Serialize, Deserialize))]
 pub enum NumValues {
     None,
@@ -305,7 +305,6 @@ pub struct Results<'a> {
 }
 
 /// Internal type to pass around matched args
-#[derive(Default, Debug)]
 struct Builder<'a> {
     flags: HashMap<&'a str, i32>,
     args: HashMap<&'a str, Value>,
@@ -386,7 +385,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
 
     fn update_values(&'a self, arg: &'a Arg, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
         debug!("getting values for {}", arg.name);
-        let res = match arg.num_values {
+        let value = match arg.num_values {
             NumValues::Any => Ok(self.get_values_unbounded(arg, args, 0)?.into()),
             NumValues::AtLeast(i) => {
                 debug!("looking for at x > {} values", i);
@@ -428,8 +427,8 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
                 }
             }
             NumValues::None => return self.try_insert_flag(arg.name, out),
-        };
-        self.try_insert_param(arg.name, res?, out)
+        }?;
+        self.try_insert_param(arg.name, value, out)
     }
 
     fn handle_arg(&'a self, arg: &str, args: &mut Peekable<T>, out: &mut Builder<'a>) -> Result<(), Error> {
@@ -450,6 +449,7 @@ impl<'a, R, S: IntoStr, T: Iterator<Item = S>> ArgsMethods<'a, R, S, T> for Args
             debug!("handling short(s) {}", arg);
             let mut matches = arg
                 .graphemes(true)
+                // @todo: use Option::contains once it's stable
                 .filter_map(|g| self.args.iter().filter(|a| a.short.is_some()).find(|a| a.short.unwrap() == g));
             match (matches.next(), matches.next()) {
                 (Some(first), None) => {
