@@ -63,7 +63,7 @@ pub enum NumValues {
 
 impl Default for NumValues {
     fn default() -> Self {
-        NumValues::Any
+        NumValues::Fixed(1)
     }
 }
 
@@ -1086,6 +1086,7 @@ mod tests {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Array(Box::from(Type::Int)),
+                num_values: NumValues::Any
             }],
             handler: |r| assert_has!(vec![&23, &32], r, "arg"),
         };
@@ -1098,6 +1099,7 @@ mod tests {
                 name: "arg",
                 long: Some("arg"),
                 value_type: Type::Array(Box::from(Type::Int)),
+                num_values: NumValues::Any
             }],
             handler: |r| assert_has!(vec![&23], r, "arg"),
         };

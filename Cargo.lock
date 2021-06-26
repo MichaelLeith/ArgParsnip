@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "argparsnip"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "criterion",
  "hashbrown 0.11.2",
