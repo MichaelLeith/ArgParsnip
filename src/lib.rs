@@ -7,7 +7,7 @@ mod std;
 #[cfg(feature = "derive")]
 use serde::{Deserialize, Serialize};
 
-mod value;
+pub mod value;
 
 use std::iter::Peekable;
 use std::string::String;
