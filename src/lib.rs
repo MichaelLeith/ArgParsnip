@@ -591,7 +591,7 @@ impl<'a, R> Args<'a, R> {
     ///     ${name} - ${about}
     ///
     /// @todo: currently value_name & num_values are not added
-    fn generate_help(&self) -> String {
+    pub fn generate_help(&self) -> String {
         let mut help = format!(
             "{}\nUSAGE:\n\t{} [SUBCOMMAND] [OPTIONS]\nOPTIONS:\n",
             self.about,
@@ -759,6 +759,39 @@ mod tests {
             }
         };
     }
+
+    test!(test_two_required_args_with_validated() {
+        let args = args! {
+            args: vec![arg! {
+                name: "arg",
+                long: Some("arg"),
+                short: Some("a"),
+                required: true,
+                num_values: NumValues::Fixed(2),
+                value_type: Type::Array(Box::new(Type::String)),
+                validation: |val| {
+                    let val: String = val.try_into().unwrap();
+                    match val.as_str() {
+                        "1" | "2" => Ok(()),
+                        _ => Err("bad".to_string())
+                    }
+                }
+            }, arg! {
+                name: "arg2",
+                long: Some("arg2"),
+                short: Some("b"),
+                required: true,
+                num_values: NumValues::Fixed(2),
+                value_type: Type::Array(Box::new(Type::String))
+            }],
+            fail_on_unknown_args: true,
+            handler: |r| {
+                println!("{:#?}", r);
+                assert_has!(vec!["1", "2"], r, "arg")
+            },
+        };
+        assert_eq!(Ok(1), args.parse(vec!["prog", "--arg", "1", "2", "-b", "3", "4"]));
+    });
 
     test!(test_returning_results() {
         let args = args! {
